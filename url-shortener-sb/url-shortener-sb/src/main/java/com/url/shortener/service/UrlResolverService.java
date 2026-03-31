@@ -5,7 +5,9 @@ import org.springframework.stereotype.Service;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 @Service
@@ -15,30 +17,41 @@ public class UrlResolverService {
     private static final int CONNECT_TIMEOUT_MS = 5000;
     private static final int READ_TIMEOUT_MS = 5000;
 
-    public String resolveFinalUrl(String inputUrl) {
-        if (inputUrl == null || inputUrl.isBlank()) {
-            return inputUrl;
+    public ResolvedResult resolveUrl(String inputUrl) {
+        String current = normalize(inputUrl);
+        if (current.isBlank()) {
+            return new ResolvedResult(current, List.of());
         }
 
-        String current = inputUrl.trim();
+        List<String> chain = new ArrayList<>();
+        chain.add(current);
         Set<String> visited = new HashSet<>();
+        visited.add(current);
 
         for (int i = 0; i < MAX_REDIRECTS; i++) {
-            if (!visited.add(current)) {
-                // Stop on redirect loops and use the latest known URL.
-                return current;
-            }
-
             String location = readLocationHeader(current);
             if (location == null || location.isBlank()) {
-                // No redirect header means this is the final URL.
-                return current;
+                return new ResolvedResult(current, chain);
             }
 
-            current = toAbsoluteUrl(current, location);
+            String next = normalize(toAbsoluteUrl(current, location));
+            if (next.isBlank()) {
+                return new ResolvedResult(current, chain);
+            }
+
+            chain.add(next);
+            if (!visited.add(next)) {
+                return new ResolvedResult(next, chain);
+            }
+
+            current = next;
         }
 
-        return current;
+        return new ResolvedResult(current, chain);
+    }
+
+    public String resolveFinalUrl(String inputUrl) {
+        return resolveUrl(inputUrl).finalUrl();
     }
 
     private String readLocationHeader(String url) {
@@ -82,6 +95,27 @@ public class UrlResolverService {
         } catch (Exception ex) {
             return location;
         }
+    }
+
+    private String normalize(String value) {
+        if (value == null) {
+            return "";
+        }
+
+        String normalized = value.trim();
+        if (!normalized.isBlank()
+                && !normalized.toLowerCase().startsWith("http://")
+                && !normalized.toLowerCase().startsWith("https://")) {
+            normalized = "https://" + normalized;
+        }
+
+        if (normalized.endsWith("/") && normalized.length() > "https://".length()) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
+    }
+
+    public record ResolvedResult(String finalUrl, List<String> chain) {
     }
 }
 

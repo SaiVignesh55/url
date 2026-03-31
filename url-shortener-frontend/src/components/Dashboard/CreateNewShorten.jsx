@@ -10,6 +10,7 @@ import toast from 'react-hot-toast';
 const CreateNewShorten = ({ setOpen, refetch }) => {
     const { token } = useStoreContext();
     const [loading, setLoading] = useState(false);
+    const backendBaseUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:9000";
 
   const {
     register,
@@ -34,7 +35,7 @@ const CreateNewShorten = ({ setOpen, refetch }) => {
             },
           });
 
-          const shortenUrl = `${import.meta.env.VITE_REACT_FRONT_END_URL + "/s/" + `${res.shortUrl}`}`;
+          const shortenUrl = `${backendBaseUrl}/r/${res.shortUrl}`;
           navigator.clipboard.writeText(shortenUrl).then(() => {
             toast.success("Short URL Copied to Clipboard", {
                 position: "bottom-center",
@@ -46,7 +47,7 @@ const CreateNewShorten = ({ setOpen, refetch }) => {
           await refetch();
           reset();
           setOpen(false);
-    } catch (error) {
+    } catch {
         toast.error("Create ShortURL Failed");
     } finally {
         setLoading(false);

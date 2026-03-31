@@ -57,8 +57,10 @@ public class WebSecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/scan").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/scan/async").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/scan/async/**").permitAll()
                         .requestMatchers("/api/urls/**").authenticated()
-                        .requestMatchers("/{shortUrl}").permitAll()
+                        .requestMatchers("/r/**").permitAll()
                         .anyRequest().authenticated()
                 );
         http.authenticationProvider(authenticationProvider());

@@ -1,9 +1,9 @@
-# URL Scanner Phase 6 Setup (Google + VirusTotal)
+# URL Scanner Setup (Google Safe Browsing + urlscan.io)
 
-This project can use two optional external providers:
+This project uses two optional external providers:
 
 - Google Safe Browsing
-- VirusTotal
+- urlscan.io
 
 If keys are missing, the scanner still works with local rules.
 
@@ -16,12 +16,11 @@ If keys are missing, the scanner still works with local rules.
 5. Click `Create Credentials` -> `API key`.
 6. Copy the generated key.
 
-## 2) Create VirusTotal API key
+## 2) Create urlscan.io API key
 
-1. Open https://www.virustotal.com/ and sign in.
-2. Open your profile.
-3. Go to `API key` section.
-4. Copy your personal API key.
+1. Open https://urlscan.io/ and sign in.
+2. Open your account settings.
+3. Copy your API key.
 
 ## 3) Add keys in backend environment
 
@@ -29,7 +28,7 @@ Use the backend `.env` file (or system environment variables):
 
 ```dotenv
 GOOGLE_SAFE_BROWSING_API_KEY=your_google_key
-VIRUSTOTAL_API_KEY=your_virustotal_key
+URLSCAN_API_KEY=your_urlscan_key
 ```
 
 You can use `.env.example` as a template.
@@ -38,15 +37,15 @@ You can use `.env.example` as a template.
 
 - `src/main/resources/application.properties`
   - `google.safe-browsing.api-key=${GOOGLE_SAFE_BROWSING_API_KEY}`
-  - `virustotal.api-key=${VIRUSTOTAL_API_KEY:}`
+  - `urlscan.api-key=${URLSCAN_API_KEY}`
 
-## 5) Async API endpoints (Phase 6)
+## 5) urlscan polling behavior
 
-- `POST /api/scan/async` -> submit a scan job, returns `jobId`
-- `GET /api/scan/async/{jobId}` -> get current status/result
+- `urlscan.submit-url` -> submit scan request
+- `urlscan.result-url-template` -> fetch result by UUID
+- `urlscan.poll.max-attempts` and `urlscan.poll.delay-ms` control timeout behavior
 
 ## 6) Notes
 
-- VirusTotal may return no report for unknown URLs.
-- This implementation treats provider failures as non-blocking and continues with available checks.
-
+- urlscan may take time to complete; scanner polls for a limited number of attempts.
+- Provider failures are non-blocking and scanner continues with available checks.

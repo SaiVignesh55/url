@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -70,12 +71,20 @@ public class UrlScanCacheService {
                 source.getStatus(),
                 source.getMessage(),
                 source.getScannedUrl(),
-                source.getRiskScore(),
-                new ArrayList<>(source.getReasons())
+                source.getFinalScore(),
+                source.getBreakdown() == null ? new LinkedHashMap<>() : new LinkedHashMap<>(source.getBreakdown()),
+                source.getCategoryLabels() == null ? new LinkedHashMap<>() : new LinkedHashMap<>(source.getCategoryLabels()),
+                source.getChecksPerformed() == null ? new ArrayList<>() : new ArrayList<>(source.getChecksPerformed()),
+                source.getReasons() == null ? new ArrayList<>() : new ArrayList<>(source.getReasons()),
+                source.getRedirectChain() == null ? new ArrayList<>() : new ArrayList<>(source.getRedirectChain()),
+                source.getFinalUrl(),
+                source.getContactedDomains() == null ? new ArrayList<>() : new ArrayList<>(source.getContactedDomains()),
+                source.getScriptCount(),
+                source.getPageTitle(),
+                source.getScreenshotUrl()
         );
     }
 
     private record CacheEntry(UrlScanResponse response, long expiresAtEpochMillis) {
     }
 }
-
