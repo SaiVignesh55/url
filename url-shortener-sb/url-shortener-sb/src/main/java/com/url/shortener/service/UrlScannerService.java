@@ -51,6 +51,9 @@ public class UrlScannerService {
     @Value("${url.scan.score.virustotal-threat:40}")
     private int virusTotalThreatScore;
 
+    @Value("${url.scan.score.virustotal-suspicious:10}")
+    private int virusTotalSuspiciousScore;
+
     @Value("${url.scan.threshold.suspicious:30}")
     private int suspiciousThreshold;
 
@@ -116,10 +119,10 @@ public class UrlScannerService {
                 reasons.add(google.reason);
             }
 
-            if (virusTotal.threatDetected) {
-                riskScore += virusTotalThreatScore;
-                reasons.add("VirusTotal reported malicious/suspicious detections");
-            } else if (virusTotal.reason != null) {
+            if (virusTotal.scoreContribution > 0) {
+                riskScore += virusTotal.scoreContribution;
+            }
+            if (virusTotal.reason != null) {
                 reasons.add(virusTotal.reason);
             }
 
@@ -190,8 +193,14 @@ public class UrlScannerService {
             HttpEntity<Void> entity = new HttpEntity<>(headers);
 
             RestTemplate restTemplate = new RestTemplate();
-            ResponseEntity<String> response = restTemplate.exchange(lookupUri, HttpMethod.GET, entity, String.class);
-            String responseBody = response == null ? null : response.getBody();
+            ResponseEntity<String> response = restTemplate.exchange(
+                    lookupUri,
+                    HttpMethod.GET,
+                    entity,
+                    String.class
+            );
+
+            String responseBody = (response != null) ? response.getBody() : null;
 
             if (responseBody == null || responseBody.isBlank()) {
                 return ProviderResult.info("VirusTotal unavailable (empty response)");
@@ -199,13 +208,47 @@ public class UrlScannerService {
 
             JsonNode root = objectMapper.readTree(responseBody);
             JsonNode stats = root.path("data").path("attributes").path("last_analysis_stats");
+
             int malicious = stats.path("malicious").asInt(0);
             int suspicious = stats.path("suspicious").asInt(0);
 
-            if (malicious + suspicious > 0) {
-                return ProviderResult.threat();
+            // =========================
+            // ✅ FIXED DECISION LOGIC
+            // =========================
+
+            // Strong malicious consensus → Dangerous
+            if (malicious >= 5) {
+                return ProviderResult.scored(
+                        virusTotalThreatScore,
+                        "VirusTotal confirmed malicious by multiple engines: " + malicious
+                );
             }
-            return ProviderResult.info("VirusTotal found no malicious detections");
+
+            // Moderate signals → Suspicious
+            if (malicious >= 2) {
+                return ProviderResult.scored(
+                        20,
+                        "VirusTotal shows multiple detections: " + malicious
+                );
+            }
+
+            // Single detection → Ignore (false positive)
+            if (malicious == 1) {
+                return ProviderResult.info(
+                        "Single engine flagged (likely false positive)"
+                );
+            }
+
+            // Weak suspicious signals
+            if (suspicious > 2) {
+                return ProviderResult.scored(
+                        virusTotalSuspiciousScore,
+                        "Multiple suspicious signals: " + suspicious
+                );
+            }
+
+            return ProviderResult.info("VirusTotal found no significant threats");
+
         } catch (HttpClientErrorException.NotFound ex) {
             return ProviderResult.info("VirusTotal has no existing report for this URL yet");
         } catch (HttpClientErrorException.TooManyRequests ex) {
@@ -294,19 +337,25 @@ public class UrlScannerService {
 
     private static class ProviderResult {
         private final boolean threatDetected;
+        private final int scoreContribution;
         private final String reason;
 
-        private ProviderResult(boolean threatDetected, String reason) {
+        private ProviderResult(boolean threatDetected, int scoreContribution, String reason) {
             this.threatDetected = threatDetected;
+            this.scoreContribution = scoreContribution;
             this.reason = reason;
         }
 
         private static ProviderResult threat() {
-            return new ProviderResult(true, null);
+            return new ProviderResult(true, 0, null);
+        }
+
+        private static ProviderResult scored(int scoreContribution, String reason) {
+            return new ProviderResult(false, scoreContribution, reason);
         }
 
         private static ProviderResult info(String reason) {
-            return new ProviderResult(false, reason);
+            return new ProviderResult(false, 0, reason);
         }
     }
 
