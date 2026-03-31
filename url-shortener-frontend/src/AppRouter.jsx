@@ -10,6 +10,7 @@ import LoginPage from "./components/LoginPage";
 import DashboardLayout from "./components/Dashboard/DashboardLayout";
 import PrivateRoute from "./PrivateRoute";
 import ErrorPage from "./components/ErrorPage";
+import UrlScannerPage from "./components/UrlScannerPage";
 
 // <PrivateRoute publicPage={true}>
 //      <RegisterPage />
@@ -25,6 +26,7 @@ const AppRouter = () => {
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/about" element={<AboutPage />} />
+          <Route path="/scanner" element={<UrlScannerPage />} />
           <Route path="/s/:url" element={<ShortenUrlPage />} />
 
           <Route path="/register" element={<PrivateRoute publicPage={true}><RegisterPage /></PrivateRoute>} />

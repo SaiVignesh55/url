@@ -62,10 +62,7 @@ public class UrlScanCacheService {
     }
 
     private void evictOneEntry() {
-        String firstKey = cache.keySet().stream().findFirst().orElse(null);
-        if (firstKey != null) {
-            cache.remove(firstKey);
-        }
+        cache.keySet().stream().findFirst().ifPresent(cache::remove);
     }
 
     private UrlScanResponse copyResponse(UrlScanResponse source) {
