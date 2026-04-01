@@ -2,8 +2,8 @@ import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { IoIosMenu } from "react-icons/io";
 import { RxCross2 } from "react-icons/rx";
+import { motion as Motion } from "framer-motion";
 import { useStoreContext } from "../contextApi/ContextApi";
-
 
 const Navbar = () => {
   const navigate = useNavigate();
@@ -17,80 +17,80 @@ const Navbar = () => {
     navigate("/login");
   };
 
+  const navItems = [
+    { path: "/", label: "Home" },
+    { path: "/about", label: "About" },
+    { path: "/scanner", label: "URL Scanner" },
+    ...(token ? [{ path: "/dashboard", label: "Dashboard" }] : []),
+  ];
+
   return (
-    <div className="h-16 bg-custom-gradient  z-50 flex items-center sticky top-0 ">
-      <div className="lg:px-14 sm:px-8 px-4 w-full flex justify-between">
-        <Link to="/">
-          <h1 className="font-bold text-3xl text-white italic sm:mt-0 mt-2">
-            Linklytics
-          </h1>
+    <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-900/65 backdrop-blur-xl">
+      <div className="lg:px-14 sm:px-8 px-4 h-16 w-full flex justify-between items-center">
+        <Link to="/" className="relative z-20">
+          <h1 className="font-bold text-3xl text-white italic">Linklytics</h1>
         </Link>
+
         <ul
-          className={`flex sm:gap-10 gap-4 sm:items-center sm:mt-1 sm:pt-0 pt-3 text-slate-800 sm:static absolute left-0 top-[62px] sm:shadow-none shadow-md ${
-            navbarOpen ? "h-fit sm:pb-0 pb-5" : "h-0 overflow-hidden"
-          }  transition-all duration-100 sm:h-fit sm:bg-none  bg-custom-gradient sm:w-fit w-full sm:flex-row flex-col px-4 sm:px-0`}
+          className={`sm:static absolute left-0 top-16 sm:w-auto w-full sm:h-auto sm:bg-transparent bg-slate-900/95 sm:backdrop-blur-none backdrop-blur-xl
+            sm:flex sm:flex-row flex-col sm:items-center gap-2 sm:gap-6 px-4 sm:px-0 transition-all duration-300 border-b sm:border-0 border-white/10
+            ${navbarOpen ? "max-h-96 py-3" : "max-h-0 py-0 overflow-hidden sm:max-h-none"}`}
         >
-          <li className="hover:text-btnColor font-[500]  transition-all duration-150">
-            <Link
-              className={`${
-                path === "/" ? "text-white font-semibold" : "text-gray-200"
-              }`}
-              to="/"
-            >
-              Home
-            </Link>
-          </li>
-          <li className="hover:text-btnColor font-[500]  transition-all duration-150">
-            <Link
-              className={`${
-                path === "/about" ? "text-white font-semibold" : "text-gray-200"
-              }`}
-              to="/about"
-            >
-              About
-            </Link>
-          </li>
-          <li className="hover:text-btnColor font-[500]  transition-all duration-150">
-            <Link
-              className={`${
-                path === "/scanner" ? "text-white font-semibold" : "text-gray-200"
-              }`}
-              to="/scanner"
-            >
-              URL Scanner
-            </Link>
-          </li>
-          {token && (
-            <li className="hover:text-btnColor font-[500]  transition-all duration-150">
-            <Link
-              className={`${
-                path === "/dashboard" ? "text-white font-semibold" : "text-gray-200"
-              }`}
-              to="/dashboard"
-            >
-              Dashboard
-            </Link>
-          </li>
-          )}
-          {!token && (
-            <Link to="/register">
-              <li className=" sm:ml-0 -ml-1 bg-rose-700 text-white  cursor-pointer w-24 text-center font-semibold px-2 py-2 rounded-md  hover:text-slate-300   transition-all duration-150">
-                SignUp
+          {navItems.map((item) => {
+            const active = path === item.path;
+            return (
+              <li key={item.path} className="relative py-1">
+                <Link
+                  to={item.path}
+                  className={`text-sm font-medium transition-colors duration-200 ${
+                    active ? "text-white" : "text-slate-300 hover:text-white"
+                  }`}
+                  onClick={() => setNavbarOpen(false)}
+                >
+                  {item.label}
+                </Link>
+                {active && (
+                  <Motion.span
+                    layoutId="nav-underline"
+                    className="absolute -bottom-1 left-0 h-0.5 w-full bg-gradient-to-r from-blue-400 to-purple-500"
+                  />
+                )}
               </li>
-            </Link>
-            )}
+            );
+          })}
+
+          {!token && (
+            <li className="sm:ml-2">
+              <Link to="/register" onClick={() => setNavbarOpen(false)}>
+                <Motion.span
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="inline-block btn-gradient text-sm"
+                >
+                  Sign Up
+                </Motion.span>
+              </Link>
+            </li>
+          )}
 
           {token && (
-            <button
-             onClick={onLogOutHandler}
-             className="sm:ml-0 -ml-1 bg-rose-700 text-white  cursor-pointer w-24 text-center font-semibold px-2 py-2 rounded-md  hover:text-slate-300   transition-all duration-150">
-              LogOut
-            </button>
-            )}
+            <li className="sm:ml-2">
+              <Motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={onLogOutHandler}
+                className="bg-rose-600/90 text-white text-sm font-semibold rounded-xl px-4 py-2 shadow-lg shadow-rose-700/30"
+              >
+                Log Out
+              </Motion.button>
+            </li>
+          )}
         </ul>
+
         <button
-          onClick={() => setNavbarOpen(!navbarOpen)}
-          className="sm:hidden flex items-center sm:mt-0 mt-2"
+          onClick={() => setNavbarOpen((prev) => !prev)}
+          className="sm:hidden flex items-center"
+          aria-label="Toggle navigation"
         >
           {navbarOpen ? (
             <RxCross2 className="text-white text-3xl" />
@@ -99,7 +99,7 @@ const Navbar = () => {
           )}
         </button>
       </div>
-    </div>
+    </header>
   );
 };
 

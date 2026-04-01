@@ -1,4 +1,5 @@
-import { Route, Routes } from "react-router-dom";
+import React, { Suspense, lazy } from "react";
+import { Route, Routes, useLocation } from "react-router-dom";
 import Navbar from "./components/NavBar";
 import ShortenUrlPage from "./components/ShortenUrlPage";
 import { Toaster } from "react-hot-toast";
@@ -12,15 +13,23 @@ import PrivateRoute from "./PrivateRoute";
 import ErrorPage from "./components/ErrorPage";
 import UrlScannerPage from "./components/UrlScannerPage";
 
+const AmbientBackground3D = lazy(() => import("./components/AmbientBackground3D"));
+
 // <PrivateRoute publicPage={true}>
 //      <RegisterPage />
 // </PrivateRoute>
 
 const AppRouter = () => {
+  const location = useLocation();
   const hideHeaderFooter = location.pathname.startsWith("/s");
 
     return (
-        <>
+        <div className="app-gradient-bg relative min-h-screen">
+        <div className="noise-overlay" />
+        <Suspense fallback={null}>
+          <AmbientBackground3D />
+        </Suspense>
+        <div className="relative z-10">
         {!hideHeaderFooter && <Navbar /> }
         <Toaster position='bottom-center'/>
         <Routes>
@@ -37,7 +46,8 @@ const AppRouter = () => {
           <Route path="*" element={ <ErrorPage message="We can't seem to find the page you're looking for"/>} />
         </Routes>
         {!hideHeaderFooter && <Footer />}
-      </>
+        </div>
+      </div>
     );
 }
 

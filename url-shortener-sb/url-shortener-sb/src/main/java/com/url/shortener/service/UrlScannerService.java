@@ -66,10 +66,10 @@ public class UrlScannerService {
     @Value("${urlscan.result-url-template:https://urlscan.io/api/v1/result/%s/}")
     private String urlscanResultUrlTemplate;
 
-    @Value("${urlscan.poll.max-attempts:6}")
+    @Value("${urlscan.poll.max-attempts:10}")
     private int urlscanPollMaxAttempts;
 
-    @Value("${urlscan.poll.delay-ms:1500}")
+    @Value("${urlscan.poll.delay-ms:2000}")
     private long urlscanPollDelayMs;
 
     @Value("${url.scan.max-length:120}")
@@ -192,9 +192,13 @@ public class UrlScannerService {
             if (shouldCallUrlscan) {
                 UrlscanBehavior urlscanBehavior = scanWithUrlScan(finalUrl);
                 if (urlscanBehavior.externalError) {
-                    spamScore += 5;
-                    reasons.add("Partial analysis due to urlscan failure");
-                    checksPerformed.add("Behavior analysis unavailable");
+                    spamScore += 8;
+                    reasons.add("Behavior analysis unavailable");
+                    if ("TIMEOUT".equals(urlscanBehavior.scanStatus)) {
+                        checksPerformed.add("Behavior analysis timeout");
+                    } else {
+                        checksPerformed.add("Behavior analysis unavailable");
+                    }
                 } else {
                     behavior = urlscanBehavior;
                     behavior.redirectChain = mergeRedirectChains(redirectChain, urlscanBehavior.redirectChain);
@@ -219,15 +223,34 @@ public class UrlScannerService {
                         spamScore += 20;
                         reasons.add("High number of contacted domains");
                     }
+                    if (containsAdTrackerKeyword(behavior.contactedDomains)) {
+                        spamScore += 10;
+                        reasons.add("Ad/tracker domains detected");
+                    }
                     checksPerformed.add("Behavior analysis completed");
                 }
             } else {
                 checksPerformed.add("Behavior analysis skipped");
             }
 
+            boolean piracyDetected = false;
             if (isPiracyDomain(finalDomain)) {
-                piracyScore += 70;
+                piracyScore += 80;
+                piracyDetected = true;
                 reasons.add("Piracy domain detected");
+            }
+            if (!getMatchedKeywords(finalUrl, piracyKeywordsCsv).isEmpty()) {
+                piracyScore += 80;
+                piracyDetected = true;
+                reasons.add("Piracy-related URL patterns detected");
+            }
+            if (containsPiracyTitle(behavior.pageTitle)) {
+                piracyScore += 80;
+                piracyDetected = true;
+                reasons.add("Piracy-related page title detected");
+            }
+            if (piracyDetected) {
+                piracyScore = Math.min(100, piracyScore);
             }
 
             if (isSuspiciousTld(getTld(finalDomain))) {
@@ -327,6 +350,7 @@ public class UrlScannerService {
                     behavior.pageTitle,
                     behavior.screenshotUrl
             );
+            response.setTotalRequests(behavior.totalRequests);
             urlScanCacheService.put(finalUrl, response);
             if (!finalUrl.equalsIgnoreCase(resolvedFinalUrl)) {
                 urlScanCacheService.put(resolvedFinalUrl, response);
@@ -344,7 +368,7 @@ public class UrlScannerService {
     }
 
     private UrlScanResponse buildErrorResponse(String status, String message, String scannedUrl, List<String> reasons) {
-        return new UrlScanResponse(
+        UrlScanResponse response = new UrlScanResponse(
                 status,
                 message,
                 scannedUrl,
@@ -360,6 +384,8 @@ public class UrlScannerService {
                 "",
                 ""
         );
+        response.setTotalRequests(0);
+        return response;
     }
 
     // Google Safe Browsing API integration (primary signal)
@@ -456,18 +482,18 @@ public class UrlScannerService {
         }
 
         try {
-            String uuid = submitUrlscanJob(url);
+            String uuid = submitScan(url);
             if (uuid == null || uuid.isBlank()) {
                 return UrlscanBehavior.externalFailure(url);
             }
-            return pollUrlscanResult(uuid, url);
+            return getScanResult(uuid, url);
         } catch (Exception ex) {
             log.error("urlscan submit failed for URL: {}", url, ex);
             return UrlscanBehavior.externalFailure(url);
         }
     }
 
-    private String submitUrlscanJob(String url) throws Exception {
+    private String submitScan(String url) throws Exception {
         RestTemplate restTemplate = new RestTemplate();
 
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -490,7 +516,7 @@ public class UrlScannerService {
         return root.path("uuid").asText(null);
     }
 
-    private UrlscanBehavior pollUrlscanResult(String uuid, String originalUrl) {
+    private UrlscanBehavior getScanResult(String uuid, String originalUrl) {
         RestTemplate restTemplate = new RestTemplate();
 
         for (int attempt = 1; attempt <= urlscanPollMaxAttempts; attempt++) {
@@ -522,7 +548,7 @@ public class UrlScannerService {
             }
         }
 
-        return UrlscanBehavior.externalFailure(originalUrl);
+        return UrlscanBehavior.timeoutFailure(originalUrl);
     }
 
     private UrlscanBehavior parseUrlscanResult(JsonNode root, String originalUrl) {
@@ -541,6 +567,16 @@ public class UrlScannerService {
                 String redirect = node.asText("").trim();
                 if (!redirect.isBlank()) {
                     behavior.redirectChain.add(normalizeUrl(redirect));
+                }
+            }
+        }
+        if (behavior.redirectChain.isEmpty()) {
+            UrlResolverService.ResolvedResult fallbackResolved = urlResolverService.resolveUrl(originalUrl);
+            if (fallbackResolved.chain() != null && !fallbackResolved.chain().isEmpty()) {
+                behavior.redirectChain.addAll(fallbackResolved.chain());
+                String fallbackFinal = normalizeUrl(fallbackResolved.finalUrl());
+                if (!fallbackFinal.isBlank()) {
+                    behavior.finalUrl = fallbackFinal;
                 }
             }
         }
@@ -564,8 +600,12 @@ public class UrlScannerService {
 
         JsonNode scriptsNode = root.path("lists").path("scripts");
         behavior.scriptCount = scriptsNode.isArray() ? scriptsNode.size() : 0;
+        behavior.totalRequests = root.path("stats").path("requests").asInt(0);
         behavior.pageTitle = root.path("page").path("title").asText("");
         behavior.screenshotUrl = root.path("task").path("screenshotURL").asText("");
+        if (behavior.screenshotUrl.isBlank()) {
+            behavior.screenshotUrl = root.path("task").path("screenshot").asText("");
+        }
         if (behavior.screenshotUrl.isBlank()) {
             behavior.screenshotUrl = root.path("page").path("screenshot").asText("");
         }
@@ -999,8 +1039,10 @@ public class UrlScannerService {
         private String finalUrl;
         private List<String> contactedDomains;
         private int scriptCount;
+        private int totalRequests;
         private String pageTitle;
         private String screenshotUrl;
+        private String scanStatus;
         private boolean externalError;
 
         private static UrlscanBehavior empty(String baseUrl) {
@@ -1010,14 +1052,24 @@ public class UrlScannerService {
             behavior.finalUrl = baseUrl;
             behavior.contactedDomains = new ArrayList<>();
             behavior.scriptCount = 0;
+            behavior.totalRequests = 0;
             behavior.pageTitle = "";
             behavior.screenshotUrl = "";
+            behavior.scanStatus = "SUCCESS";
             behavior.externalError = false;
             return behavior;
         }
 
         private static UrlscanBehavior externalFailure(String baseUrl) {
             UrlscanBehavior behavior = empty(baseUrl);
+            behavior.scanStatus = "FAILED";
+            behavior.externalError = true;
+            return behavior;
+        }
+
+        private static UrlscanBehavior timeoutFailure(String baseUrl) {
+            UrlscanBehavior behavior = empty(baseUrl);
+            behavior.scanStatus = "TIMEOUT";
             behavior.externalError = true;
             return behavior;
         }

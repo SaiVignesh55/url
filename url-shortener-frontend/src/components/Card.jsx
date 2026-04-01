@@ -1,20 +1,19 @@
 import React from "react";
-import { motion } from "framer-motion";
+import { motion as Motion } from "framer-motion";
+
 const Card = ({ title, desc }) => {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 120 }}
-      whileInView={{
-        opacity: 1,
-        y: 0,
-      }}
-      viewport={{ once: true }}
+    <Motion.article
+      initial={{ opacity: 0, y: 70 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, amount: 0.2 }}
       transition={{ duration: 0.5 }}
-      className="shadow-md shadow-slate-400 border flex flex-col px-4 py-8  gap-3 rounded-sm"
+      whileHover={{ y: -5 }}
+      className="glass-card p-5 sm:p-6 flex flex-col gap-3 transition-all duration-300 hover:shadow-lg"
     >
-      <h1 className="text-slate-900 text-xl font-bold ">{title}</h1>
-      <p className="text-slate-700 text-sm"> {desc}</p>
-    </motion.div>
+      <h3 className="text-white text-xl font-bold">{title}</h3>
+      <p className="text-slate-200 text-sm leading-relaxed">{desc}</p>
+    </Motion.article>
   );
 };
 

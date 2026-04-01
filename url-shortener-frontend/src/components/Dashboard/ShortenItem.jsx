@@ -1,5 +1,5 @@
 import dayjs from 'dayjs';
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import CopyToClipboard from 'react-copy-to-clipboard';
 import { FaExternalLinkAlt, FaRegCalendarAlt } from 'react-icons/fa';
 import { IoCopy } from 'react-icons/io5';
@@ -33,7 +33,7 @@ const ShortenItem = ({ originalUrl, shortUrl, clickCount, createdDate }) => {
         setAnalyticToggle(!analyticToggle);
     }
 
-    const fetchMyShortUrl = async () => {
+    const fetchMyShortUrl = useCallback(async () => {
         setLoader(true);
         try {
              const { data } = await api.get(`/api/urls/analytics/${selectedUrl}?startDate=2024-12-01T00:00:00&endDate=2025-12-31T23:59:59`, {
@@ -53,20 +53,20 @@ const ShortenItem = ({ originalUrl, shortUrl, clickCount, createdDate }) => {
         } finally {
             setLoader(false);
         }
-    }
+    }, [navigate, selectedUrl, token]);
 
 
     useEffect(() => {
         if (selectedUrl) {
             fetchMyShortUrl();
         }
-    }, [selectedUrl]);
+    }, [fetchMyShortUrl, selectedUrl]);
 
   return (
-    <div className={`bg-slate-100 shadow-lg border border-dotted  border-slate-500 px-6 sm:py-1 py-3 rounded-md  transition-all duration-100 `}>
+    <div className="glass-card px-6 sm:py-1 py-3 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
     <div className={`flex sm:flex-row flex-col  sm:justify-between w-full sm:gap-0 gap-5 py-5 `}>
       <div className="flex-1 sm:space-y-1 max-w-full overflow-x-auto overflow-y-hidden ">
-        <div className="text-slate-900 pb-1 sm:pb-0   flex items-center gap-2 ">
+        <div className="text-slate-100 pb-1 sm:pb-0   flex items-center gap-2 ">
             {/* <a href={`${import.meta.env.VITE_REACT_SUBDOMAIN}/${shortUrl}`}
                 target="_blank"
                 className=" text-[17px]  font-montserrat font-[600] text-linkColor ">
@@ -75,21 +75,21 @@ const ShortenItem = ({ originalUrl, shortUrl, clickCount, createdDate }) => {
 
             <Link
               target='_'
-              className='text-[17px]  font-montserrat font-[600] text-linkColor'
+              className='text-[17px]  font-montserrat font-[600] text-blue-300'
               to={`${backendBaseUrl}/r/${shortUrl}`}>
                   {`${subDomain}/r/${shortUrl}`}
             </Link>
-            <FaExternalLinkAlt className="text-linkColor" />
+            <FaExternalLinkAlt className="text-blue-300" />
             </div>
 
         <div className="flex items-center gap-1 ">
-            <h3 className=" text-slate-700 font-[400] text-[17px] ">
+            <h3 className=" text-slate-200 font-[400] text-[17px] ">
               {originalUrl}
             </h3>
           </div>
 
           <div className="flex   items-center gap-8 pt-6 ">
-            <div className="flex gap-1  items-center font-semibold  text-green-800">
+            <div className="flex gap-1  items-center font-semibold  text-green-300">
               <span>
                 <MdOutlineAdsClick className="text-[22px] me-1" />
               </span>
@@ -99,7 +99,7 @@ const ShortenItem = ({ originalUrl, shortUrl, clickCount, createdDate }) => {
               </span>
             </div>
 
-            <div className="flex items-center gap-2 font-semibold text-lg text-slate-800">
+            <div className="flex items-center gap-2 font-semibold text-lg text-slate-200">
               <span>
                 <FaRegCalendarAlt />
               </span>
@@ -115,7 +115,7 @@ const ShortenItem = ({ originalUrl, shortUrl, clickCount, createdDate }) => {
                 onCopy={() => setIsCopied(true)}
                 text={`${backendBaseUrl}/r/${shortUrl}`}
             >
-                <div className="flex cursor-pointer gap-1 items-center bg-btnColor py-2  font-semibold shadow-md shadow-slate-500 px-6 rounded-md text-white ">
+                <div className="flex cursor-pointer gap-1 items-center btn-gradient py-2 font-semibold px-6 rounded-xl text-white ">
                 <button className="">{isCopied ? "Copied" : "Copy"}</button>
                 {isCopied ? (
                     <LiaCheckSolid className="text-md" />
@@ -127,7 +127,7 @@ const ShortenItem = ({ originalUrl, shortUrl, clickCount, createdDate }) => {
 
             <div
                 onClick={() => analyticsHandler(shortUrl)}
-                className="flex cursor-pointer gap-1 items-center bg-rose-700 py-2 font-semibold shadow-md shadow-slate-500 px-6 rounded-md text-white "
+                className="flex cursor-pointer gap-1 items-center bg-rose-600/90 py-2 font-semibold shadow-lg shadow-rose-700/30 px-6 rounded-xl text-white hover:-translate-y-1 transition-all duration-300"
             >
                 <button>Analytics</button>
                 <MdAnalytics className="text-md" />
@@ -150,16 +150,16 @@ const ShortenItem = ({ originalUrl, shortUrl, clickCount, createdDate }) => {
                         wrapperClass=""
                         colors={['#306cce', '#72a1ed']}
                         />
-                        <p className='text-slate-700'>Please Wait...</p>
+                        <p className='text-slate-300'>Please Wait...</p>
                     </div>
                 </div>
                 ) : ( 
                     <>{analyticsData.length === 0 && (
                         <div className="absolute flex flex-col  justify-center sm:items-center items-end  w-full left-0 top-0 bottom-0 right-0 m-auto">
-                            <h1 className=" text-slate-800 font-serif sm:text-2xl text-[15px] font-bold mb-1">
+                            <h1 className=" text-white font-serif sm:text-2xl text-[15px] font-bold mb-1">
                                 No Data For This Time Period
                             </h1>
-                            <h3 className="sm:w-96 w-[90%] sm:ml-0 pl-6 text-center sm:text-lg text-[12px] text-slate-600 ">
+                            <h3 className="sm:w-96 w-[90%] sm:ml-0 pl-6 text-center sm:text-lg text-[12px] text-slate-300 ">
                                 Share your short link to view where your engagements are
                                 coming from
                             </h3>

@@ -2,9 +2,9 @@ import './App.css'
 import { BrowserRouter as Router } from 'react-router-dom'
 import { getApps } from './utils/helper'
 
-function App() {
+const CurrentApp = getApps();
 
-  const CurrentApp = getApps();
+function App() {
 
   return (
     <Router>

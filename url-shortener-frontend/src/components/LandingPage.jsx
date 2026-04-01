@@ -1,12 +1,28 @@
 import { useNavigate } from "react-router-dom";
-import React from "react";
-import { motion } from "framer-motion";
+import React, { Suspense, lazy } from "react";
+import { motion as Motion } from "framer-motion";
 
 import Card from "./Card";
 import { useStoreContext } from "../contextApi/ContextApi";
 
-let desc =
-  "Generate short, memorable links with ease using Linklytics’s intuitive interface. Share URLs effortlessly across platforms. Optimize your sharing strategy with Linklytics. Track clicks and manage your links seamlessly to enhance your online presence. Generate short, memorable links with ease using Linklytics’s intuitive interface. Share URLs effortlessly across platforms.";
+const Hero3DObject = lazy(() => import("./Hero3DObject"));
+
+const containerVariants = {
+  hidden: { opacity: 0, y: 24 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: {
+      duration: 0.6,
+      staggerChildren: 0.12,
+    },
+  },
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 24 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.5 } },
+};
 
 const LandingPage = () => {
   const navigate = useNavigate();
@@ -20,105 +36,98 @@ const LandingPage = () => {
 
     navigate("/login");
   };
+
   return (
-    <div className="min-h-[calc(100vh-64px)]  lg:px-14 sm:px-8 px-4">
-      <div className="lg:flex-row flex-col    lg:py-5   pt-16   lg:gap-10 gap-8 flex justify-between items-center">
-        <div className=" flex-1">
-          <motion.h1
-            initial={{ opacity: 0, y: -80 }}
-            whileInView={{
-              opacity: 1,
-              y: 0,
-            }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8 }}
-            className="font-bold font-roboto text-slate-800 md:text-5xl sm:text-4xl text-3xl   md:leading-[55px] sm:leading-[45px] leading-10 lg:w-full md:w-[70%] w-full"
-          >
-            Linklytics Simplifies URL Shortening For Efficient Sharing.
-          </motion.h1>
-          <p className="text-slate-700 text-sm my-5">
-            Linklytics streamlines the process of URL shortening, making sharing
-            links effortless and efficient. With its user-friendly interface,
-            Linklytics allows you to generate concise, easy-to-share URLs in
-            seconds. Simplify your sharing experience with Linklytics today.
+    <Motion.div
+      initial="hidden"
+      animate="show"
+      variants={containerVariants}
+      className="min-h-[calc(100vh-64px)] lg:px-14 sm:px-8 px-4 py-8 sm:py-10"
+    >
+      <div className="grid lg:grid-cols-2 gap-8 lg:gap-10 items-center">
+        <Motion.div variants={itemVariants} className="glass-card p-6 sm:p-8">
+          <h1 className="font-bold font-roboto text-white md:text-5xl sm:text-4xl text-3xl md:leading-[56px] sm:leading-[46px] leading-10">
+            Linklytics Makes URL Security and Sharing Feel Effortless.
+          </h1>
+          <p className="text-slate-200 text-sm sm:text-base mt-5 leading-relaxed">
+            Generate short links, scan threat signals, and monitor behavior from
+            one clean dashboard. Designed for speed, clarity, and secure sharing
+            at scale.
           </p>
-          <div className="flex items-center gap-3">
-            <motion.button
-              initial={{ opacity: 0, y: 80 }}
-              whileInView={{
-                opacity: 1,
-                y: 0,
-              }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.8 }}
+
+          <div className="flex flex-wrap items-center gap-3 mt-6">
+            <Motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
               onClick={dashBoardNavigateHandler}
-              className="bg-custom-gradient  w-40 text-white rounded-md  py-2"
+              className="btn-gradient min-w-40"
             >
               Manage Links
-            </motion.button>
-            <motion.button
-              initial={{ opacity: 0, y: 80 }}
-              whileInView={{
-                opacity: 1,
-                y: 0,
-              }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.8 }}
+            </Motion.button>
+            <Motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
               onClick={dashBoardNavigateHandler}
-              className="border-btnColor border w-40 text-btnColor rounded-md  py-2 "
+              className="min-w-40 rounded-xl px-5 py-2.5 border border-blue-300/60 text-blue-100 font-semibold hover:bg-blue-500/15 transition-all duration-300"
             >
               Create Short Link
-            </motion.button>
+            </Motion.button>
           </div>
-        </div>
-        <div className="   flex-1 flex   justify-center w-full">
-          <motion.img
-            initial={{ opacity: 0 }}
-            whileInView={{
-              opacity: 1,
-            }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8 }}
-            className="sm:w-[480px] w-[400px] object-cover rounded-md"
-            src="/images/img2.png"
-            alt=""
-          />
-        </div>
-      </div>
-      <div className="sm:pt-12 pt-7">
-        <motion.p
-          initial={{ opacity: 0, y: 50 }}
-          whileInView={{
-            opacity: 1,
-            y: 0,
-          }}
+        </Motion.div>
+
+        <Motion.div
+          variants={itemVariants}
+          initial={{ opacity: 0, x: 40 }}
+          whileInView={{ opacity: 1, x: 0 }}
           viewport={{ once: true }}
-          transition={{ duration: 0.8 }}
-          className="text-slate-800 font-roboto font-bold lg:w-[60%]  md:w-[70%] sm:w-[80%] mx-auto text-3xl text-center"
+          transition={{ duration: 0.6 }}
+          className="w-full"
         >
-          Trusted by individuals and teams at the world best companies{" "}
-        </motion.p>
-        <div className="pt-4 pb-7 grid lg:gap-7 gap-4 xl:grid-cols-4  lg:grid-cols-3 sm:grid-cols-2 grid-cols-1 mt-4">
+          <Suspense
+            fallback={<div className="h-[320px] sm:h-[380px] w-full glass-card animate-pulse" />}
+          >
+            <Hero3DObject />
+          </Suspense>
+        </Motion.div>
+      </div>
+
+      <Motion.section
+        initial={{ opacity: 0, y: 35 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.6 }}
+        className="pt-12"
+      >
+        <p className="text-white font-roboto font-bold lg:w-[60%] md:w-[70%] sm:w-[80%] mx-auto text-3xl text-center">
+          Trusted by individuals and teams at the world best companies
+        </p>
+
+        <Motion.div
+          variants={containerVariants}
+          initial="hidden"
+          whileInView="show"
+          viewport={{ once: true, amount: 0.15 }}
+          className="pt-5 pb-7 grid lg:gap-7 gap-4 xl:grid-cols-4 lg:grid-cols-3 sm:grid-cols-2 grid-cols-1 mt-4"
+        >
           <Card
             title="Simple URL Shortening"
-            desc="Experience the ease of creating short, memorable URLs in just a few clicks. Our intuitive interface and quick setup process ensure you can start shortening URLs without any hassle."
+            desc="Create short, memorable URLs in seconds with a polished workflow and no friction."
           />
           <Card
             title="Powerful Analytics"
-            desc="Gain insights into your link performance with our comprehensive analytics dashboard. Track clicks, geographical data, and referral sources to optimize your marketing strategies."
+            desc="Track clicks, traffic origins, and engagement trends to improve decisions quickly."
           />
           <Card
             title="Enhanced Security"
-            desc="Rest assured with our robust security measures. All shortened URLs are protected with advanced encryption, ensuring your data remains safe and secure."
+            desc="Scan links with multi-layer checks so suspicious destinations are flagged early."
           />
           <Card
             title="Fast and Reliable"
-            desc="Enjoy lightning-fast redirects and high uptime with our reliable infrastructure. Your shortened URLs will always be available and responsive, ensuring a seamless experience for your users.
-"
+            desc="Built on performant infrastructure for quick redirects and consistent uptime."
           />
-        </div>
-      </div>
-    </div>
+        </Motion.div>
+      </Motion.section>
+    </Motion.div>
   );
 };
 

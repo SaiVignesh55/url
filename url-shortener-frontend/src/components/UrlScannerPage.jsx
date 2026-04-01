@@ -1,4 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { motion as Motion } from "framer-motion";
+import ResultHeader from "./UrlScanner/ResultHeader";
+import CategoryCard from "./UrlScanner/CategoryCard";
+import BehaviorPanel from "./UrlScanner/BehaviorPanel";
+import ScreenshotPanel from "./UrlScanner/ScreenshotPanel";
+import ReasonsList from "./UrlScanner/ReasonsList";
 
 const ASYNC_SCAN_URL = "http://localhost:9000/api/scan/async";
 const SYNC_SCAN_URL = "http://localhost:9000/api/scan";
@@ -7,6 +14,7 @@ const POLL_TIMEOUT_MS = 20000;
 const MAX_POLL_ATTEMPTS = POLL_TIMEOUT_MS / POLL_INTERVAL_MS;
 
 const UrlScannerPage = () => {
+  const navigate = useNavigate();
   const [url, setUrl] = useState("");
   const [jobId, setJobId] = useState("");
   const [result, setResult] = useState(null);
@@ -75,21 +83,6 @@ const UrlScannerPage = () => {
     };
   }, [loading]);
 
-  const getStatusStyle = (currentStatus) => {
-    if (currentStatus === "SAFE") return "text-green-700 bg-green-50 border-green-200";
-    if (currentStatus?.startsWith("SUSPICIOUS")) return "text-amber-700 bg-amber-50 border-amber-200";
-    if (currentStatus === "DANGEROUS") return "text-red-700 bg-red-50 border-red-200";
-    if (currentStatus === "INVALID_REQUEST") return "text-slate-700 bg-slate-100 border-slate-300";
-    return "text-slate-700 bg-slate-100 border-slate-300";
-  };
-
-  const getScoreBarStyle = (currentStatus) => {
-    if (currentStatus === "SAFE") return "bg-green-600";
-    if (currentStatus?.startsWith("SUSPICIOUS")) return "bg-amber-500";
-    if (currentStatus === "DANGEROUS") return "bg-red-600";
-    return "bg-slate-500";
-  };
-
   const reasons = useMemo(
     () => (Array.isArray(result?.reasons) ? result.reasons : []),
     [result?.reasons]
@@ -116,9 +109,36 @@ const UrlScannerPage = () => {
   const scannedUrl = result?.scannedUrl || "";
   const breakdown = result?.breakdown || {};
   const categoryLabels = result?.categoryLabels || {};
-  const checksPerformed = Array.isArray(result?.checksPerformed) ? result.checksPerformed : [];
+  const checksPerformed = useMemo(
+    () => (Array.isArray(result?.checksPerformed) ? result.checksPerformed : []),
+    [result?.checksPerformed]
+  );
   const redirectChain = Array.isArray(result?.redirectChain) ? result.redirectChain : [];
   const finalUrl = result?.finalUrl || "";
+  const contactedDomains = useMemo(() => {
+    if (Array.isArray(result?.domains) && result.domains.length > 0) {
+      return result.domains;
+    }
+    return Array.isArray(result?.contactedDomains) ? result.contactedDomains : [];
+  }, [result?.contactedDomains, result?.domains]);
+  const totalRequests = Number.isFinite(result?.totalRequests) ? result.totalRequests : 0;
+
+  const categoryItems = useMemo(
+    () => [
+      { key: "malware", title: "Malware" },
+      { key: "phishing", title: "Phishing" },
+      { key: "piracy", title: "Piracy" },
+      { key: "spam", title: "Spam" },
+      { key: "redirectRisk", title: "Redirect Risk" },
+      { key: "domainRisk", title: "Domain Risk" },
+    ],
+    []
+  );
+
+  const partialAnalysis = useMemo(() => {
+    const merged = [...reasons, ...checksPerformed].join(" ").toLowerCase();
+    return merged.includes("partial") || merged.includes("unavailable") || merged.includes("fallback");
+  }, [checksPerformed, reasons]);
 
   const runSyncScan = async (urlToScan) => {
     clearPollingTimers();
@@ -135,7 +155,7 @@ const UrlScannerPage = () => {
         body: JSON.stringify({ url: urlToScan }),
       });
 
-      let data = null;
+      let data;
       try {
         data = await response.json();
       } catch {
@@ -170,7 +190,7 @@ const UrlScannerPage = () => {
       try {
         const response = await fetch(`${ASYNC_SCAN_URL}/${currentJobId}`);
 
-        let data = null;
+        let data;
         try {
           data = await response.json();
         } catch {
@@ -192,8 +212,8 @@ const UrlScannerPage = () => {
 
           if (!data?.result) {
             setError("Scan completed but no result received.");
-          } else if (data.result.status === "INVALID_REQUEST") {
-            setError(data.result.message || "Invalid request.");
+          } else if (data?.result?.status === "INVALID_REQUEST") {
+            setError(data?.result?.message || "Invalid request.");
           }
           return;
         }
@@ -247,7 +267,7 @@ const UrlScannerPage = () => {
         body: JSON.stringify({ url: normalizedInput }),
       });
 
-      let data = null;
+      let data;
       try {
         data = await response.json();
       } catch {
@@ -307,7 +327,7 @@ const UrlScannerPage = () => {
     }
   };
 
-  const hasResult = Boolean(status || message || scannedUrl || reasons.length > 0);
+  const hasResult = Boolean(status || message || scannedUrl || reasons.length > 0 || Object.keys(breakdown).length > 0);
   const pollProgressPercent = Math.min((pollAttempt / MAX_POLL_ATTEMPTS) * 100, 100);
 
   const copyFinalUrl = async () => {
@@ -323,16 +343,49 @@ const UrlScannerPage = () => {
   };
 
   return (
-    <div className="min-h-[calc(100vh-64px)] lg:px-14 sm:px-8 px-4 py-8">
-      <div className="max-w-2xl mx-auto shadow-custom rounded-md sm:p-8 p-4 bg-white">
-        <h1 className="text-2xl font-serif font-bold text-btnColor">URL Scanner</h1>
-        <p className="text-slate-600 mt-1 text-sm">
-          Check whether a URL is safe, suspicious, or dangerous.
+    <Motion.div
+      initial={{ opacity: 0, y: 24 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+      className="min-h-[calc(100vh-64px)] lg:px-14 sm:px-8 px-4 py-8"
+    >
+      <div className="max-w-6xl mx-auto glass-card sm:p-8 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="text-xs sm:text-sm text-slate-300">
+            <Link to="/" className="hover:text-white">Home</Link>
+            <span className="mx-2 text-slate-500">/</span>
+            <span className="text-slate-200">Scanner</span>
+          </div>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <Motion.button
+              type="button"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => navigate("/dashboard")}
+              className="flex-1 sm:flex-none text-sm border border-white/25 text-slate-100 rounded-xl px-3 py-2 hover:bg-white/10 transition-colors duration-200"
+            >
+              Back to Dashboard
+            </Motion.button>
+            <Motion.button
+              type="button"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => navigate("/")}
+              className="flex-1 sm:flex-none text-sm border border-white/25 text-slate-100 rounded-xl px-3 py-2 hover:bg-white/10 transition-colors duration-200"
+            >
+              Home
+            </Motion.button>
+          </div>
+        </div>
+
+        <h1 className="text-2xl font-serif font-bold text-white">URL Scanner</h1>
+        <p className="text-slate-200 mt-1 text-sm">
+          Security dashboard for URL risk analysis and behavior insights.
         </p>
 
         <form onSubmit={handleScan} className="mt-6 flex flex-col gap-4">
           <div className="flex flex-col gap-1">
-            <label htmlFor="url" className="font-semibold text-md">
+            <label htmlFor="url" className="font-semibold text-md text-slate-100">
               Enter URL
             </label>
             <input
@@ -341,62 +394,71 @@ const UrlScannerPage = () => {
               value={url}
               onChange={(event) => setUrl(event.target.value)}
               placeholder="http://localhost:9000/r/abc123 or https://example.com"
-              className="px-2 py-2 border border-slate-600 outline-none bg-transparent text-slate-700 rounded-md"
+              className="px-3 py-2.5 border border-white/20 outline-none bg-slate-900/40 text-slate-100 rounded-xl placeholder:text-slate-400"
             />
           </div>
 
           <div className="flex sm:flex-row flex-col items-center gap-3">
-            <button
+            <Motion.button
               type="submit"
               disabled={loading}
-              className="bg-customRed font-semibold text-white bg-custom-gradient sm:w-32 w-full py-2 rounded-md hover:text-slate-300 transition-colors duration-100 disabled:opacity-70"
+              whileHover={{ scale: loading ? 1 : 1.05 }}
+              whileTap={{ scale: loading ? 1 : 0.95 }}
+              className="btn-gradient sm:w-32 w-full disabled:opacity-70 disabled:cursor-not-allowed"
             >
               {loading ? "Scanning..." : "Scan"}
-            </button>
+            </Motion.button>
 
-            <button
+            <Motion.button
               type="button"
               onClick={clearAll}
               disabled={loading || (!hasResult && !error && !url)}
-              className="border border-slate-500 text-slate-700 font-semibold sm:w-32 w-full py-2 rounded-md hover:bg-slate-100 transition-colors duration-100 disabled:opacity-50"
+              whileHover={{ scale: loading ? 1 : 1.05 }}
+              whileTap={{ scale: loading ? 1 : 0.95 }}
+              className="border border-white/25 text-slate-100 font-semibold sm:w-32 w-full py-2.5 rounded-xl hover:bg-white/10 transition-colors duration-200 disabled:opacity-50"
             >
               Clear
-            </button>
+            </Motion.button>
 
             {loading && (
-              <button
+              <Motion.button
                 type="button"
                 onClick={cancelScan}
-                className="border border-red-500 text-red-600 font-semibold sm:w-32 w-full py-2 rounded-md hover:bg-red-50 transition-colors duration-100"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="border border-rose-300/40 text-rose-100 font-semibold sm:w-32 w-full py-2.5 rounded-xl hover:bg-rose-500/15 transition-colors duration-200"
               >
                 Cancel
-              </button>
+              </Motion.button>
             )}
           </div>
         </form>
 
         {loading && (
-          <div className="mt-6 border border-blue-200 rounded-md p-4 bg-blue-50">
-            <p className="text-blue-700 text-sm font-semibold">
-              Scanning in progress...
-              {jobId ? ` (Job: ${jobId})` : ""}
-            </p>
+          <div className="mt-6 border border-blue-300/30 rounded-2xl p-4 bg-blue-500/10">
+            <div className="flex items-center gap-3">
+              <span className="inline-block h-5 w-5 rounded-full border-2 border-blue-300 border-t-blue-700 animate-spin" />
+              <p className="text-blue-200 text-sm font-semibold">
+                Scanning in progress...
+                {jobId ? ` (Job: ${jobId})` : ""}
+              </p>
+            </div>
             {jobId && (
               <>
-                <p className="text-blue-700 text-xs mt-1">
+                <p className="text-blue-200 text-xs mt-1">
                   Poll attempt: {Math.min(pollAttempt, MAX_POLL_ATTEMPTS)}/{MAX_POLL_ATTEMPTS}
                 </p>
-                <p className="text-blue-700 text-xs mt-1">Elapsed: {elapsedSeconds}s</p>
-                <div className="w-full h-2 bg-blue-100 rounded-full mt-2 overflow-hidden">
+                <p className="text-blue-200 text-xs mt-1">Elapsed: {elapsedSeconds}s</p>
+                <div className="w-full h-2 bg-blue-900/50 rounded-full mt-2 overflow-hidden">
                   <div
-                    className="h-2 bg-blue-500 transition-all duration-300"
+                    className="h-2 bg-blue-400 transition-all duration-300"
                     style={{ width: `${pollProgressPercent}%` }}
                   />
                 </div>
               </>
             )}
             {fallbackMode && (
-              <p className="text-amber-700 text-xs mt-2 font-semibold">
+               <p className="text-amber-200 text-xs mt-2 font-semibold">
                 Fallback mode active: async scan unavailable, running direct scan.
               </p>
             )}
@@ -404,151 +466,78 @@ const UrlScannerPage = () => {
         )}
 
         {error && (
-          <div className="mt-6 border border-red-200 rounded-md p-4 bg-red-50">
-            <p className="text-red-700 text-sm font-semibold">{error}</p>
+          <div className="mt-6 border border-rose-300/30 rounded-2xl p-4 bg-rose-500/10">
+            <p className="text-rose-100 text-sm font-semibold">{error}</p>
             {!loading && (
-              <button
+              <Motion.button
                 type="button"
                 onClick={handleScan}
-                className="mt-3 border border-red-400 text-red-700 text-sm font-semibold px-3 py-1 rounded-md hover:bg-red-100 transition-colors duration-100"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="mt-3 border border-rose-300/40 text-rose-100 text-sm font-semibold px-3 py-1 rounded-md hover:bg-rose-500/15 transition-colors duration-100"
               >
                 Try Again
-              </button>
+              </Motion.button>
             )}
+          </div>
+        )}
+
+        {hasResult && partialAnalysis && (
+          <div className="mt-6 border border-amber-300/30 rounded-2xl p-4 bg-amber-500/10">
+            <p className="text-amber-100 text-sm font-semibold">
+              Partial analysis - some services unavailable.
+            </p>
           </div>
         )}
 
         {hasResult && (
-          <div className="mt-8 border border-slate-300 rounded-md p-4 bg-slate-50">
-            <h2 className="font-bold text-lg text-slate-900">Scan Result</h2>
+          <Motion.div
+            initial={{ opacity: 0, y: 16 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.45 }}
+            className="mt-8 space-y-4"
+          >
+            <ResultHeader
+              status={status}
+              message={message}
+              scannedUrl={scannedUrl}
+              finalScore={finalScore}
+              onCopyScannedUrl={copyScannedUrl}
+              copied={copied}
+            />
 
-            <div className={`mt-3 border rounded-md px-3 py-2 inline-block text-sm font-semibold ${getStatusStyle(status)}`}>
-              STATUS: {status || "N/A"}
-            </div>
-
-            <p className="text-slate-700 mt-3 text-sm">
-              <span className="font-semibold">Message:</span> {message || "No message"}
-            </p>
-
-            <p className="text-slate-700 mt-1 text-sm break-all">
-              <span className="font-semibold">Scanned URL:</span> {scannedUrl || "-"}
-            </p>
-
-            {scannedUrl && (
-              <div className="mt-2">
-                <button
-                  type="button"
-                  onClick={copyScannedUrl}
-                  className="border border-slate-400 text-slate-700 text-xs font-semibold px-3 py-1 rounded-md hover:bg-slate-100 transition-colors duration-100"
-                >
-                  {copied ? "Copied" : "Copy Scanned URL"}
-                </button>
+            <section className="glass-card p-6">
+              <h3 className="text-base font-semibold text-white">Category Breakdown</h3>
+              <div className="mt-4 grid grid-cols-2 lg:grid-cols-3 gap-3">
+                {categoryItems.map((item) => (
+                  <CategoryCard
+                    key={item.key}
+                    title={item.title}
+                    score={Number.isFinite(breakdown[item.key]) ? breakdown[item.key] : 0}
+                    label={categoryLabels[item.key]}
+                  />
+                ))}
               </div>
-            )}
+            </section>
 
-            <div className="mt-4">
-              <div className="flex justify-between text-slate-700 text-sm font-semibold">
-                <span>Risk Score</span>
-                <span>{finalScore}/100</span>
-              </div>
-              <div className="w-full h-2 bg-slate-200 rounded-full mt-2 overflow-hidden">
-                <div
-                  className={`h-2 ${getScoreBarStyle(status)} transition-all duration-500`}
-                  style={{ width: `${finalScore}%` }}
-                />
-              </div>
-            </div>
+            <BehaviorPanel
+              finalUrl={finalUrl}
+              redirectChain={redirectChain}
+              totalRequests={totalRequests}
+              domains={contactedDomains}
+              checksPerformed={checksPerformed}
+              onCopyFinalUrl={copyFinalUrl}
+              copiedFinal={copiedFinal}
+            />
 
-            {Object.keys(breakdown).length > 0 && (
-              <div className="mt-4">
-                <h3 className="font-semibold text-slate-800">Category Scores:</h3>
-                <div className="mt-2 grid sm:grid-cols-2 grid-cols-1 gap-2">
-                  {Object.entries(breakdown).map(([key, value]) => (
-                    <div key={key} className="border border-slate-300 rounded-md p-2 bg-white">
-                      <p className="text-xs text-slate-500">{key}</p>
-                      <p className="text-sm font-semibold text-slate-800">
-                        {value} / {categoryLabels[key] || "N/A"}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            <ScreenshotPanel screenshotUrl={parsedScreenshotUrl} />
 
-            {checksPerformed.length > 0 && (
-              <div className="mt-4">
-                <h3 className="font-semibold text-slate-800">Checks Performed:</h3>
-                <ul className="list-disc ml-5 mt-1 text-slate-700 text-sm space-y-1">
-                  {checksPerformed.map((item, index) => (
-                    <li key={`${item}-${index}`}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {(finalUrl || redirectChain.length > 0) && (
-              <div className="mt-4">
-                <h3 className="font-semibold text-slate-800">Redirect Analysis</h3>
-
-                <p className="text-slate-700 mt-2 text-sm break-all">
-                  <span className="font-semibold">Final URL:</span> {finalUrl || "-"}
-                </p>
-
-                {finalUrl && (
-                  <div className="mt-2">
-                    <button
-                      type="button"
-                      onClick={copyFinalUrl}
-                      className="border border-slate-400 text-slate-700 text-xs font-semibold px-3 py-1 rounded-md hover:bg-slate-100 transition-colors duration-100"
-                    >
-                      {copiedFinal ? "Copied" : "Copy Final URL"}
-                    </button>
-                  </div>
-                )}
-
-                <div className="mt-3">
-                  <p className="font-semibold text-slate-700 text-sm">Redirect Chain:</p>
-                  {redirectChain.length > 0 ? (
-                    <ul className="list-disc ml-5 mt-1 text-slate-700 text-sm space-y-1 break-all">
-                      {redirectChain.map((item, index) => (
-                        <li key={`${item}-${index}`}>{item}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-slate-700 text-sm mt-1">No redirects detected.</p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <div className="mt-4">
-              <h3 className="font-semibold text-slate-800">Reasons:</h3>
-              {visibleReasons.length > 0 ? (
-                <ul className="list-disc ml-5 mt-1 text-slate-700 text-sm space-y-1">
-                  {visibleReasons.map((reason, index) => (
-                    <li key={`${reason}-${index}`}>{reason}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-slate-700 text-sm mt-1">No reasons provided by scanner.</p>
-              )}
-            </div>
-
-            {parsedScreenshotUrl && (
-              <div className="mt-6">
-                <h3 className="font-semibold text-slate-800 mb-2">Screenshot</h3>
-                <img
-                  src={parsedScreenshotUrl}
-                  alt="Scanned website preview"
-                  className="w-full rounded-md border border-slate-300"
-                  loading="lazy"
-                />
-              </div>
-            )}
-          </div>
+            <ReasonsList reasons={visibleReasons} />
+          </Motion.div>
         )}
       </div>
-    </div>
+    </Motion.div>
   );
 };
 
