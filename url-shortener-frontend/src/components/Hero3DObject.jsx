@@ -1,33 +1,33 @@
 import React, { useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Float, Environment } from "@react-three/drei";
+import { Environment } from "@react-three/drei";
 
 const RotatingTorus = () => {
   const meshRef = useRef(null);
 
   useFrame(() => {
     if (!meshRef.current) return;
-    meshRef.current.rotation.x += 0.003;
-    meshRef.current.rotation.y += 0.004;
+    meshRef.current.rotation.y += 0.0025;
   });
 
   return (
-    <Float speed={1.2} rotationIntensity={0.5} floatIntensity={1.2}>
+    <group position={[1.4, 0, 0]} scale={2.1}>
       <mesh ref={meshRef}>
-        <torusKnotGeometry args={[0.9, 0.24, 140, 18]} />
-        <meshStandardMaterial color="#7c3aed" metalness={0.65} roughness={0.15} />
+        <torusKnotGeometry args={[1.15, 0.38, 200, 32]} />
+        <meshStandardMaterial color="#7c3aed" metalness={0.9} roughness={0.14} />
       </mesh>
-    </Float>
+    </group>
   );
 };
 
-const Hero3DObject = () => {
+const Hero3DObject = ({ className = "h-[320px] sm:h-[380px] w-full" }) => {
   return (
-    <div className="h-[320px] sm:h-[380px] w-full glass-card rounded-2xl overflow-hidden">
-      <Canvas camera={{ position: [0, 0, 3.4], fov: 42 }}>
-        <ambientLight intensity={0.7} />
-        <directionalLight intensity={1.1} position={[2, 4, 3]} color="#93c5fd" />
-        <directionalLight intensity={0.8} position={[-2, -2, 1]} color="#c4b5fd" />
+    <div className={className}>
+      <Canvas camera={{ position: [1.8, 0, 6.2], fov: 50 }} frameloop="always">
+        <ambientLight intensity={0.45} />
+        <directionalLight position={[3, 3, 5]} intensity={1.2} />
+        <pointLight position={[2, 0, 3]} intensity={2} color="#a855f7" />
+        <pointLight position={[-2, 0, 2]} intensity={1} color="#6366f1" />
         <RotatingTorus />
         <Environment preset="city" />
       </Canvas>

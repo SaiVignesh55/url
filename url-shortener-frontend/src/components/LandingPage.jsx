@@ -44,52 +44,46 @@ const LandingPage = () => {
       variants={containerVariants}
       className="min-h-[calc(100vh-64px)] lg:px-14 sm:px-8 px-4 py-8 sm:py-10"
     >
-      <div className="grid lg:grid-cols-2 gap-8 lg:gap-10 items-center">
-        <Motion.div variants={itemVariants} className="glass-card p-6 sm:p-8">
-          <h1 className="font-bold font-roboto text-white md:text-5xl sm:text-4xl text-3xl md:leading-[56px] sm:leading-[46px] leading-10">
-            Linklytics Makes URL Security and Sharing Feel Effortless.
-          </h1>
-          <p className="text-slate-200 text-sm sm:text-base mt-5 leading-relaxed">
-            Generate short links, scan threat signals, and monitor behavior from
-            one clean dashboard. Designed for speed, clarity, and secure sharing
-            at scale.
-          </p>
-
-          <div className="flex flex-wrap items-center gap-3 mt-6">
-            <Motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={dashBoardNavigateHandler}
-              className="btn-gradient min-w-40"
-            >
-              Manage Links
-            </Motion.button>
-            <Motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={dashBoardNavigateHandler}
-              className="min-w-40 rounded-xl px-5 py-2.5 border border-blue-300/60 text-blue-100 font-semibold hover:bg-blue-500/15 transition-all duration-300"
-            >
-              Create Short Link
-            </Motion.button>
-          </div>
-        </Motion.div>
-
-        <Motion.div
-          variants={itemVariants}
-          initial={{ opacity: 0, x: 40 }}
-          whileInView={{ opacity: 1, x: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
-          className="w-full"
-        >
-          <Suspense
-            fallback={<div className="h-[320px] sm:h-[380px] w-full glass-card animate-pulse" />}
-          >
-            <Hero3DObject />
+      <section className="relative h-[78vh] min-h-[520px] overflow-hidden rounded-[26px] border border-white/20 bg-gradient-to-r from-[#081532] to-[#1b1844]">
+        <div className="absolute inset-0 z-0">
+          <Suspense fallback={<div className="h-full w-full bg-slate-900/40" />}>
+            <Hero3DObject className="h-full w-full" />
           </Suspense>
-        </Motion.div>
-      </div>
+        </div>
+
+        <div className="absolute inset-0 z-10 bg-gradient-to-r from-[#0f172a]/92 via-[#0f172a]/70 to-transparent" />
+
+        <div className="relative z-20 h-full flex items-center px-6 sm:px-10 lg:px-14">
+          <Motion.div variants={itemVariants} className="max-w-2xl">
+            <h1 className="text-white font-roboto font-bold text-5xl sm:text-6xl lg:text-7xl leading-[1.04] tracking-tight">
+              Scan. Shorten. Secure.
+            </h1>
+
+            <p className="mt-4 text-slate-300 text-base sm:text-lg">
+              Your all-in-one URL intelligence platform.
+            </p>
+
+            <div className="flex flex-wrap items-center gap-3 mt-8">
+              <Motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={dashBoardNavigateHandler}
+                className="btn-gradient min-w-[11rem]"
+              >
+                Start Scanning
+              </Motion.button>
+              <Motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={dashBoardNavigateHandler}
+                className="min-w-[11rem] rounded-xl px-5 py-2.5 border border-white/30 text-slate-100 font-semibold bg-white/10 hover:bg-white/15 transition-all duration-300"
+              >
+                Create Short Link
+              </Motion.button>
+            </div>
+          </Motion.div>
+        </div>
+      </section>
 
       <Motion.section
         initial={{ opacity: 0, y: 35 }}
