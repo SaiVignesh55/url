@@ -14,8 +14,15 @@ import java.util.Map;
 @AllArgsConstructor
 public class UrlScanResponse {
     private String status;
+    private String verdict;
     private String message;
     private String scannedUrl;
+    private int malwareScore;
+    private int phishingScore;
+    private int spamScore;
+    private int piracyScore;
+    private int redirectScore;
+    private int domainScore;
     private int finalScore;
     private Map<String, Integer> breakdown;
     private Map<String, String> categoryLabels;
@@ -49,6 +56,7 @@ public class UrlScanResponse {
             String screenshotUrl
     ) {
         this.status = status;
+        this.verdict = status;
         this.message = message;
         this.scannedUrl = scannedUrl;
         this.finalScore = finalScore;
@@ -63,14 +71,28 @@ public class UrlScanResponse {
         this.totalRequests = 0;
         this.pageTitle = pageTitle;
         this.screenshotUrl = screenshotUrl;
+
+        this.malwareScore = this.breakdown.getOrDefault("malware", 0);
+        this.phishingScore = this.breakdown.getOrDefault("phishing", 0);
+        this.spamScore = this.breakdown.getOrDefault("spam", 0);
+        this.piracyScore = this.breakdown.getOrDefault("piracy", 0);
+        this.redirectScore = this.breakdown.getOrDefault("redirect", this.breakdown.getOrDefault("redirectRisk", 0));
+        this.domainScore = this.breakdown.getOrDefault("domain", this.breakdown.getOrDefault("domainRisk", 0));
     }
 
     // Backward-compatible constructor used by older code paths.
     public UrlScanResponse(String status, String message, String scannedUrl, int riskScore, List<String> reasons) {
         this.status = status;
+        this.verdict = status;
         this.message = message;
         this.scannedUrl = scannedUrl;
         this.finalScore = riskScore;
+        this.malwareScore = 0;
+        this.phishingScore = 0;
+        this.spamScore = 0;
+        this.piracyScore = 0;
+        this.redirectScore = 0;
+        this.domainScore = 0;
         this.breakdown = new LinkedHashMap<>();
         this.categoryLabels = new LinkedHashMap<>();
         this.checksPerformed = new ArrayList<>();

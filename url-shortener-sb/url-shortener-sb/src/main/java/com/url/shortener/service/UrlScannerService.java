@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -22,6 +23,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -90,6 +92,12 @@ public class UrlScannerService {
     @Value("${url.scan.async.max-jobs:200}")
     private int maxAsyncJobs;
 
+    @Value("${url.scan.suspicious-tlds:xyz,tk,top,click,gq}")
+    private String suspiciousTldsCsv;
+
+    @Value("${url.scan.piracy-keywords:torrent,watch free,movierulz,123movies}")
+    private String piracyKeywordsCsv;
+
     private final ObjectMapper objectMapper;
     private final RestTemplate scannerRestTemplate;
     private final UrlResolverService urlResolverService;
@@ -98,72 +106,321 @@ public class UrlScannerService {
     private final SsrfProtectionService ssrfProtectionService;
     private final HttpRetryService retryService;
 
+    @Autowired
     @Qualifier("scanTaskExecutor")
-    private final Executor scanTaskExecutor;
+    private Executor scanTaskExecutor;
 
     private final Map<String, AsyncScanJob> asyncJobs = new ConcurrentHashMap<>();
 
     public UrlScanResponse scanUrl(String url) {
+        // STEP 1: normalize URL
         UrlNormalizationService.NormalizedUrl normalized = urlNormalizationService.normalizeAndValidate(url);
+        log.debug("Pipeline step1 normalize complete: {}", maskUrl(normalized.normalizedUrl()));
+
         UrlScanResponse cached = urlScanCacheService.get(normalized.normalizedUrl());
         if (cached != null) {
+            log.debug("Cache hit for {}", maskUrl(normalized.normalizedUrl()));
             return cached;
         }
 
+        // STEP 2: resolve redirects
         UrlResolverService.ResolvedResult resolved = urlResolverService.resolveUrl(normalized.normalizedUrl());
         List<String> chain = resolved.chain() == null || resolved.chain().isEmpty()
                 ? List.of(normalized.normalizedUrl())
                 : resolved.chain();
+        String finalUrl = chain.get(chain.size() - 1);
+        log.debug("Pipeline step2 resolve complete: chainSize={}, finalUrl={}", chain.size(), maskUrl(finalUrl));
 
-        AggregatedSignals signals = evaluateAllHops(chain, normalized.potentialHomograph());
+        // STEP 5: urlscan can run in parallel while GSB/VT execute.
+        CompletableFuture<UrlscanBehavior> urlscanFuture = CompletableFuture.supplyAsync(
+                () -> shouldRunUrlscan() ? scanWithUrlScan(urlNormalizationService.normalizeAndValidate(finalUrl).urlscanSafeUrl()) : UrlscanBehavior.skipped(finalUrl),
+                scanTaskExecutor
+        );
 
-        UrlscanBehavior behavior = UrlscanBehavior.empty(chain.get(chain.size() - 1));
-        if (urlscanApiKey != null && !urlscanApiKey.isBlank()) {
-            behavior = scanWithUrlScan(urlNormalizationService.normalizeAndValidate(chain.get(chain.size() - 1)).urlscanSafeUrl());
-            if (behavior.externalError) {
-                signals.reasons.add("urlscan unavailable");
-                signals.unknownSignals = true;
-            } else {
-                signals.reasons.add("urlscan behavior collected");
-                if (behavior.scriptCount > 30 || behavior.contactedDomains.size() > 20) {
-                    signals.suspiciousScore += 15;
-                }
-            }
+        // STEP 3 + 4: always run GSB + VT for each hop.
+        ScoreState state = evaluateCoreSignals(chain, normalized.potentialHomograph(), resolved);
+
+        UrlscanBehavior behavior;
+        try {
+            behavior = urlscanFuture.get();
+        } catch (Exception ex) {
+            behavior = UrlscanBehavior.externalFailure(finalUrl);
+        }
+        applyUrlscanSignals(state, behavior);
+
+        int finalScore = calculateFinalScore(state);
+        String verdict = determineVerdict(finalScore, state.apiFailureSignals);
+
+        UrlScanResponse response = buildResponse(normalized.normalizedUrl(), finalUrl, chain, behavior, state, finalScore, verdict);
+        urlScanCacheService.put(normalized.normalizedUrl(), response);
+
+        log.info("Scan completed: url={}, verdict={}, score={}", maskUrl(normalized.normalizedUrl()), verdict, finalScore);
+        log.debug("Category scores malware={}, phishing={}, spam={}, piracy={}, redirect={}, domain={}",
+                state.malwareScore, state.phishingScore, state.spamScore, state.piracyScore, state.redirectScore, state.domainScore);
+        return response;
+    }
+
+    private ScoreState evaluateCoreSignals(List<String> chain, boolean potentialHomograph, UrlResolverService.ResolvedResult resolved) {
+        ScoreState state = new ScoreState();
+
+        if (potentialHomograph) {
+            state.domainScore = Math.max(state.domainScore, 25);
+            state.reasons.add("Potential homograph/punycode domain detected");
         }
 
         if (resolved.loopDetected()) {
-            signals.reasons.add("Redirect loop detected");
-            signals.suspiciousScore += 30;
+            state.redirectScore = Math.max(state.redirectScore, 30);
+            state.reasons.add("Redirect loop detected");
         }
         if (resolved.maxDepthReached()) {
-            signals.reasons.add("Redirect depth limit reached");
-            signals.suspiciousScore += 25;
-            signals.unknownSignals = true;
+            state.redirectScore = Math.max(state.redirectScore, 25);
+            state.reasons.add("Redirect depth limit reached");
         }
 
-        int finalScore = calculateScore(signals);
-        String status = determineStatus(signals, finalScore);
+        if (chain.size() > 1) {
+            state.redirectScore = Math.max(state.redirectScore, Math.min(30, 10 + ((chain.size() - 1) * 5)));
+            state.reasons.add("Redirect chain length > 1");
+        }
+        if (hasDomainChange(chain)) {
+            state.redirectScore = Math.max(state.redirectScore, Math.min(40, state.redirectScore + 10));
+            state.reasons.add("Domain changed across redirects");
+        }
+
+        for (String hop : chain) {
+            UrlNormalizationService.NormalizedUrl normalizedHop = urlNormalizationService.normalizeAndValidate(hop);
+            URI hopUri = normalizedHop.uri();
+            ssrfProtectionService.assertPublicDestination(hopUri);
+
+            String domain = extractDomain(normalizedHop.normalizedUrl());
+            applyDomainHeuristics(state, domain, normalizedHop.normalizedUrl());
+            applyPiracyHeuristics(state, domain, normalizedHop.normalizedUrl());
+            applySpamHeuristics(state, normalizedHop.normalizedUrl());
+
+            log.debug("Pipeline step3 calling GSB for {}", maskUrl(normalizedHop.normalizedUrl()));
+            GoogleSafeBrowsingResult gsb = checkGoogleSafeBrowsing(normalizedHop.normalizedUrl());
+            state.checksPerformed.add("Google Safe Browsing checked");
+            log.debug("GSB result for {} => malware={}, phishing={}, externalError={}", maskUrl(normalizedHop.normalizedUrl()), gsb.malware, gsb.phishing, gsb.externalError);
+
+            if (gsb.externalError) {
+                state.apiFailureSignals = true;
+                state.reasons.add("Google Safe Browsing unavailable");
+            }
+            if (gsb.malware) {
+                state.malwareScore = Math.max(state.malwareScore, 95);
+                state.reasons.add("Google Safe Browsing flagged malware");
+            }
+            if (gsb.phishing) {
+                state.phishingScore = Math.max(state.phishingScore, 90);
+                state.reasons.add("Google Safe Browsing flagged phishing");
+            }
+
+            log.debug("Pipeline step4 calling VirusTotal for {}", maskUrl(normalizedHop.normalizedUrl()));
+            VirusTotalResult vt = checkVirusTotal(normalizedHop.normalizedUrl());
+            state.checksPerformed.add(vt.checked ? "VirusTotal checked" : "VirusTotal partial/unavailable");
+            log.debug("VirusTotal result for {} => malicious={}, suspicious={}, checked={}, pending={}",
+                    maskUrl(normalizedHop.normalizedUrl()), vt.maliciousEngines, vt.suspiciousEngines, vt.checked, vt.analysisPending);
+
+            if (!vt.checked) {
+                state.apiFailureSignals = true;
+                state.reasons.add("VirusTotal analysis incomplete or unavailable");
+            }
+            if (vt.maliciousEngines > 0) {
+                state.malwareScore = Math.max(state.malwareScore, 90);
+                state.phishingScore = Math.max(state.phishingScore, 80);
+                state.reasons.add("VirusTotal flagged URL as malicious");
+            }
+            if (vt.suspiciousEngines > 0) {
+                state.spamScore = Math.max(state.spamScore, 60);
+                state.phishingScore = Math.max(state.phishingScore, 70);
+                state.reasons.add("VirusTotal flagged as suspicious");
+            }
+        }
+
+        return state;
+    }
+
+    private void applyUrlscanSignals(ScoreState state, UrlscanBehavior behavior) {
+        if (behavior == null) {
+            state.checksPerformed.add("urlscan skipped");
+            return;
+        }
+
+        if ("SKIPPED".equals(behavior.scanStatus)) {
+            state.checksPerformed.add("urlscan skipped");
+            return;
+        }
+
+        state.checksPerformed.add("urlscan checked");
+
+        if (behavior.externalError) {
+            state.apiFailureSignals = true;
+            state.reasons.add("urlscan unavailable");
+            return;
+        }
+
+        if (behavior.scriptCount > 25) {
+            state.spamScore = Math.max(state.spamScore, 55);
+            state.reasons.add("High script activity detected via urlscan");
+        }
+        if (behavior.contactedDomains.size() > 15) {
+            state.spamScore = Math.max(state.spamScore, 50);
+            state.reasons.add("High contacted domain count via urlscan");
+        }
+        if (behavior.pageTitle != null && containsAny(behavior.pageTitle.toLowerCase(), piracyKeywordsCsv.toLowerCase())) {
+            state.piracyScore = Math.max(state.piracyScore, 70);
+            state.reasons.add("Piracy keyword found in page title");
+        }
+        if (behavior.screenshotUrl != null && !behavior.screenshotUrl.isBlank()) {
+            state.reasons.add("urlscan screenshot captured");
+        }
+    }
+
+    private void applyDomainHeuristics(ScoreState state, String domain, String url) {
+        if (domain.isBlank()) {
+            return;
+        }
+        String tld = extractTld(domain);
+        if (containsAny(tld, suspiciousTldsCsv)) {
+            state.domainScore = Math.max(state.domainScore, 25);
+            state.reasons.add("Suspicious TLD detected");
+        }
+        if (hasDigitSubstitution(domain)) {
+            state.domainScore = Math.max(state.domainScore, 20);
+            state.reasons.add("Suspicious domain digit substitution");
+        }
+        if (url.length() > 180) {
+            state.domainScore = Math.max(state.domainScore, 20);
+            state.reasons.add("Very long URL detected");
+        }
+    }
+
+    private void applyPiracyHeuristics(ScoreState state, String domain, String url) {
+        String lowerDomain = domain == null ? "" : domain.toLowerCase();
+        String lowerUrl = url == null ? "" : url.toLowerCase();
+
+        if (lowerDomain.contains("torrent") || lowerDomain.contains("movierulz") || lowerDomain.contains("123movies")) {
+            state.piracyScore = Math.max(state.piracyScore, 80);
+            state.reasons.add("Piracy domain pattern detected");
+        }
+
+        if (containsAny(lowerUrl, piracyKeywordsCsv.toLowerCase())) {
+            state.piracyScore = Math.max(state.piracyScore, 65);
+            state.reasons.add("Piracy keyword detected in URL");
+        }
+    }
+
+    private void applySpamHeuristics(ScoreState state, String url) {
+        if (url == null) {
+            return;
+        }
+        int queryCount = countQueryParams(url);
+        if (queryCount >= 4) {
+            state.spamScore = Math.max(state.spamScore, Math.min(70, 30 + (queryCount * 5)));
+            state.reasons.add("High query-parameter count detected");
+        }
+        String lower = url.toLowerCase();
+        if (lower.contains("redirect=") || lower.contains("utm_") || lower.contains("click")) {
+            state.spamScore = Math.max(state.spamScore, 45);
+            state.reasons.add("Tracking/redirect URL pattern detected");
+        }
+    }
+
+    private int calculateFinalScore(ScoreState state) {
+        double weighted = (state.malwareScore * 0.30)
+                + (state.phishingScore * 0.25)
+                + (state.spamScore * 0.15)
+                + (state.piracyScore * 0.10)
+                + (state.redirectScore * 0.10)
+                + (state.domainScore * 0.10);
+        int score = (int) Math.round(weighted);
+        return Math.max(0, Math.min(100, score));
+    }
+
+    private String determineVerdict(int finalScore, boolean apiFailureSignals) {
+        if (apiFailureSignals && finalScore < 30) {
+            return "UNKNOWN";
+        }
+        if (finalScore > 70) {
+            return "MALICIOUS";
+        }
+        if (finalScore >= 30) {
+            return "SUSPICIOUS";
+        }
+        return "SAFE";
+    }
+
+    private UrlScanResponse buildResponse(String scannedUrl,
+                                          String finalUrl,
+                                          List<String> chain,
+                                          UrlscanBehavior behavior,
+                                          ScoreState state,
+                                          int finalScore,
+                                          String verdict) {
+        Map<String, Integer> breakdown = new LinkedHashMap<>();
+        breakdown.put("malware", state.malwareScore);
+        breakdown.put("phishing", state.phishingScore);
+        breakdown.put("spam", state.spamScore);
+        breakdown.put("piracy", state.piracyScore);
+        breakdown.put("redirect", state.redirectScore);
+        breakdown.put("domain", state.domainScore);
+
+        Map<String, String> labels = new LinkedHashMap<>();
+        labels.put("malware", level(state.malwareScore));
+        labels.put("phishing", level(state.phishingScore));
+        labels.put("spam", level(state.spamScore));
+        labels.put("piracy", level(state.piracyScore));
+        labels.put("redirect", level(state.redirectScore));
+        labels.put("domain", level(state.domainScore));
 
         UrlScanResponse response = new UrlScanResponse(
-                status,
-                buildMessage(status),
-                normalized.normalizedUrl(),
+                verdict,
+                messageFor(verdict),
+                scannedUrl,
                 finalScore,
-                buildBreakdown(signals),
-                buildCategoryLabels(signals, finalScore),
-                signals.checksPerformed,
-                dedupe(signals.reasons),
+                breakdown,
+                labels,
+                dedupe(state.checksPerformed),
+                dedupe(state.reasons),
                 chain,
-                chain.get(chain.size() - 1),
-                behavior.contactedDomains,
-                behavior.scriptCount,
-                behavior.pageTitle,
-                behavior.screenshotUrl
+                finalUrl,
+                behavior == null ? List.of() : behavior.contactedDomains,
+                behavior == null ? 0 : behavior.scriptCount,
+                behavior == null ? "" : behavior.pageTitle,
+                behavior == null ? "" : behavior.screenshotUrl
         );
-        response.setTotalRequests(behavior.totalRequests);
 
-        urlScanCacheService.put(normalized.normalizedUrl(), response);
+        response.setVerdict(verdict);
+        response.setMalwareScore(state.malwareScore);
+        response.setPhishingScore(state.phishingScore);
+        response.setSpamScore(state.spamScore);
+        response.setPiracyScore(state.piracyScore);
+        response.setRedirectScore(state.redirectScore);
+        response.setDomainScore(state.domainScore);
+        response.setTotalRequests(behavior == null ? 0 : behavior.totalRequests);
         return response;
+    }
+
+    private String messageFor(String verdict) {
+        return switch (verdict) {
+            case "MALICIOUS" -> "High-confidence malicious indicators detected";
+            case "SUSPICIOUS" -> "Suspicious indicators detected";
+            case "UNKNOWN" -> "Unable to fully verify due to provider failures";
+            default -> "No high-risk signals detected";
+        };
+    }
+
+    private String level(int score) {
+        if (score > 70) {
+            return "HIGH";
+        }
+        if (score >= 30) {
+            return "MEDIUM";
+        }
+        return "LOW";
+    }
+
+    private boolean shouldRunUrlscan() {
+        return urlscanApiKey != null && !urlscanApiKey.isBlank();
     }
 
     public String submitAsyncScan(String url) {
@@ -173,31 +430,31 @@ public class UrlScannerService {
             throw new ResponseStatusException(TOO_MANY_REQUESTS, "Too many async scan jobs");
         }
 
-        String jobId = UUID.randomUUID().toString();
-        AsyncScanJob job = new AsyncScanJob(jobId);
-        asyncJobs.put(jobId, job);
+        String scanId = UUID.randomUUID().toString();
+        AsyncScanJob job = new AsyncScanJob(scanId);
+        asyncJobs.put(scanId, job);
 
         CompletableFuture
                 .supplyAsync(() -> scanUrl(url), scanTaskExecutor)
                 .orTimeout(asyncTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
                 .whenComplete((result, throwable) -> {
                     if (throwable != null) {
-                        completeUnknown(jobId, url, throwable);
+                        completeUnknown(scanId, url, throwable);
                     } else {
-                        completeJob(jobId, result);
+                        completeJob(scanId, result);
                     }
                 });
 
-        return jobId;
+        return scanId;
     }
 
-    public UrlScanAsyncStatusResponse getAsyncScanStatus(String jobId) {
+    public UrlScanAsyncStatusResponse getAsyncScanStatus(String scanId) {
         cleanupExpiredAsyncJobs();
-        AsyncScanJob job = asyncJobs.get(jobId);
+        AsyncScanJob job = asyncJobs.get(scanId);
         if (job == null) {
             throw new ResponseStatusException(NOT_FOUND, "Async scan job not found");
         }
-        return new UrlScanAsyncStatusResponse(job.jobId, job.status, job.result, job.errorMessage);
+        return new UrlScanAsyncStatusResponse(job.scanId, job.status, job.result, job.errorMessage);
     }
 
     @Scheduled(fixedDelayString = "${url.scan.async.cleanup-interval-ms:60000}")
@@ -219,57 +476,6 @@ public class UrlScannerService {
 
     public void clearScanCache() {
         urlScanCacheService.clear();
-    }
-
-    private AggregatedSignals evaluateAllHops(List<String> chain, boolean potentialHomograph) {
-        AggregatedSignals signals = new AggregatedSignals();
-        if (potentialHomograph) {
-            signals.reasons.add("Potential homograph/punycode domain detected");
-            signals.suspiciousScore += 20;
-        }
-
-        for (String hop : chain) {
-            UrlNormalizationService.NormalizedUrl hopNormalized = urlNormalizationService.normalizeAndValidate(hop);
-            URI uri = hopNormalized.uri();
-            ssrfProtectionService.assertPublicDestination(uri);
-
-            GoogleSafeBrowsingResult gsb = checkGoogleSafeBrowsing(hopNormalized.normalizedUrl());
-            VirusTotalResult vt = checkVirusTotal(hopNormalized.normalizedUrl());
-
-            signals.checksPerformed.add("Google Safe Browsing checked");
-            signals.checksPerformed.add(vt.checked ? "VirusTotal checked" : "VirusTotal unavailable");
-
-            if (gsb.externalError || !vt.checked) {
-                signals.unknownSignals = true;
-            }
-
-            if (gsb.malicious) {
-                signals.maliciousScore = Math.max(signals.maliciousScore, 95);
-                signals.reasons.add("Google Safe Browsing detected malicious threat");
-            }
-            if (gsb.suspicious) {
-                signals.suspiciousScore = Math.max(signals.suspiciousScore, 75);
-                signals.reasons.add("Google Safe Browsing detected suspicious threat");
-            }
-
-            if (vt.maliciousEngines > 0) {
-                signals.maliciousScore = Math.max(signals.maliciousScore, 90);
-                signals.reasons.add("VirusTotal marked URL as malicious");
-            } else if (vt.suspiciousEngines > 0) {
-                signals.suspiciousScore = Math.max(signals.suspiciousScore, 65);
-                signals.reasons.add("VirusTotal marked URL as suspicious");
-            } else if (vt.analysisPending) {
-                signals.unknownSignals = true;
-                signals.reasons.add("VirusTotal analysis pending");
-            }
-        }
-
-        if (chain.size() > 1) {
-            signals.suspiciousScore += 10;
-            signals.reasons.add("Redirect chain detected");
-        }
-
-        return signals;
     }
 
     private GoogleSafeBrowsingResult checkGoogleSafeBrowsing(String url) {
@@ -298,22 +504,22 @@ public class UrlScannerService {
 
             JsonNode root = objectMapper.readTree(response.getBody());
             JsonNode matches = root.path("matches");
-            boolean malicious = false;
-            boolean suspicious = false;
+            boolean malware = false;
+            boolean phishing = false;
             if (matches.isArray()) {
                 for (JsonNode match : matches) {
                     String threatType = match.path("threatType").asText("");
                     if ("MALWARE".equalsIgnoreCase(threatType)
                             || "POTENTIALLY_HARMFUL_APPLICATION".equalsIgnoreCase(threatType)) {
-                        malicious = true;
+                        malware = true;
                     }
                     if ("SOCIAL_ENGINEERING".equalsIgnoreCase(threatType)
                             || "UNWANTED_SOFTWARE".equalsIgnoreCase(threatType)) {
-                        suspicious = true;
+                        phishing = true;
                     }
                 }
             }
-            return new GoogleSafeBrowsingResult(malicious, suspicious, false);
+            return new GoogleSafeBrowsingResult(malware, phishing, false);
         } catch (Exception ex) {
             log.warn("Google Safe Browsing unavailable for {}", maskUrl(url));
             return GoogleSafeBrowsingResult.unavailable();
@@ -426,6 +632,7 @@ public class UrlScannerService {
 
     private UrlscanBehavior scanWithUrlScan(String safeUrl) {
         try {
+            log.debug("Pipeline step5 calling urlscan submit for {}", maskUrl(safeUrl));
             String uuid = submitUrlscan(safeUrl);
             if (uuid == null || uuid.isBlank()) {
                 return UrlscanBehavior.externalFailure(safeUrl);
@@ -473,7 +680,7 @@ public class UrlScannerService {
                     return parseUrlscanResult(root, fallbackUrl);
                 }
             } catch (HttpClientErrorException.NotFound ex) {
-                // Result not ready yet.
+                // Still processing.
             } catch (Exception ex) {
                 return UrlscanBehavior.externalFailure(fallbackUrl);
             }
@@ -485,8 +692,7 @@ public class UrlScannerService {
     private UrlscanBehavior parseUrlscanResult(JsonNode root, String fallbackUrl) {
         UrlscanBehavior behavior = UrlscanBehavior.empty(fallbackUrl);
 
-        String finalUrl = root.path("page").path("url").asText(fallbackUrl);
-        behavior.finalUrl = finalUrl;
+        behavior.finalUrl = root.path("page").path("url").asText(fallbackUrl);
 
         JsonNode domainsNode = root.path("lists").path("domains");
         if (domainsNode.isArray()) {
@@ -502,15 +708,23 @@ public class UrlScannerService {
         behavior.scriptCount = scriptsNode.isArray() ? scriptsNode.size() : 0;
         behavior.totalRequests = root.path("stats").path("requests").asInt(0);
         behavior.pageTitle = root.path("page").path("title").asText("");
-        behavior.screenshotUrl = root.path("task").path("screenshotURL").asText("");
 
+        String screenshot = root.path("task").path("screenshotURL").asText("");
+        if (screenshot.isBlank()) {
+            screenshot = root.path("task").path("screenshot").asText("");
+        }
+        if (screenshot.isBlank()) {
+            screenshot = root.path("page").path("screenshot").asText("");
+        }
+        behavior.screenshotUrl = screenshot;
+        behavior.scanStatus = "COMPLETED";
         return behavior;
     }
 
     private Map<String, Object> buildSafeBrowsingPayload(String url) {
         Map<String, Object> client = new LinkedHashMap<>();
         client.put("clientId", "url-shortener");
-        client.put("clientVersion", "2.0");
+        client.put("clientVersion", "3.0");
 
         Map<String, Object> threatEntry = new LinkedHashMap<>();
         threatEntry.put("url", url);
@@ -527,64 +741,76 @@ public class UrlScannerService {
         return payload;
     }
 
-    private int calculateScore(AggregatedSignals signals) {
-        int score = Math.max(signals.maliciousScore, signals.suspiciousScore);
-        if (signals.unknownSignals) {
-            score = Math.max(score, 40);
+    private boolean hasDomainChange(List<String> chain) {
+        Set<String> domains = new LinkedHashSet<>();
+        for (String url : chain) {
+            String domain = extractDomain(url);
+            if (!domain.isBlank()) {
+                domains.add(domain);
+            }
         }
-        return Math.min(100, Math.max(0, score));
+        return domains.size() > 1;
     }
 
-    private String determineStatus(AggregatedSignals signals, int score) {
-        if (signals.maliciousScore >= 90 || score >= 90) {
-            return "MALICIOUS";
+    private String extractDomain(String url) {
+        try {
+            URL parsed = new URL(url);
+            return parsed.getHost() == null ? "" : parsed.getHost().toLowerCase();
+        } catch (Exception ex) {
+            return "";
         }
-        if (signals.unknownSignals && signals.maliciousScore < 90) {
-            return "UNKNOWN";
-        }
-        if (signals.suspiciousScore >= 50 || score >= 50) {
-            return "SUSPICIOUS";
-        }
-        return "SAFE";
     }
 
-    private String buildMessage(String status) {
-        return switch (status) {
-            case "MALICIOUS" -> "Malicious indicators confirmed";
-            case "SUSPICIOUS" -> "Suspicious indicators detected";
-            case "UNKNOWN" -> "Scan could not be completed with high confidence";
-            default -> "No malicious indicators found";
-        };
-    }
-
-    private Map<String, Integer> buildBreakdown(AggregatedSignals signals) {
-        Map<String, Integer> breakdown = new LinkedHashMap<>();
-        breakdown.put("malicious", signals.maliciousScore);
-        breakdown.put("suspicious", signals.suspiciousScore);
-        breakdown.put("unknown", signals.unknownSignals ? 100 : 0);
-        return breakdown;
-    }
-
-    private Map<String, String> buildCategoryLabels(AggregatedSignals signals, int finalScore) {
-        Map<String, String> labels = new LinkedHashMap<>();
-        labels.put("malicious", label(signals.maliciousScore));
-        labels.put("suspicious", label(signals.suspiciousScore));
-        labels.put("overall", label(finalScore));
-        labels.put("confidence", signals.unknownSignals ? "LOW" : "HIGH");
-        return labels;
-    }
-
-    private String label(int score) {
-        if (score >= 90) {
-            return "HIGH";
+    private String extractTld(String domain) {
+        if (domain == null || !domain.contains(".")) {
+            return "";
         }
-        if (score >= 50) {
-            return "MEDIUM";
-        }
-        return "LOW";
+        String[] parts = domain.split("\\.");
+        return parts[parts.length - 1].toLowerCase();
     }
 
-    private void completeUnknown(String jobId, String inputUrl, Throwable throwable) {
+    private boolean hasDigitSubstitution(String domain) {
+        boolean hasLetter = false;
+        boolean hasDigit = false;
+        for (char ch : domain.toCharArray()) {
+            if (Character.isLetter(ch)) {
+                hasLetter = true;
+            }
+            if (Character.isDigit(ch)) {
+                hasDigit = true;
+            }
+        }
+        return hasLetter && hasDigit;
+    }
+
+    private boolean containsAny(String value, String csv) {
+        if (value == null || csv == null) {
+            return false;
+        }
+        for (String token : csv.split(",")) {
+            String cleaned = token.trim().toLowerCase();
+            if (!cleaned.isBlank() && value.toLowerCase().contains(cleaned)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private int countQueryParams(String url) {
+        int question = url.indexOf('?');
+        if (question < 0 || question == url.length() - 1) {
+            return 0;
+        }
+        int count = 1;
+        for (char ch : url.substring(question + 1).toCharArray()) {
+            if (ch == '&') {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private void completeUnknown(String scanId, String inputUrl, Throwable throwable) {
         Throwable root = throwable instanceof CompletionException && throwable.getCause() != null
                 ? throwable.getCause()
                 : throwable;
@@ -598,13 +824,13 @@ public class UrlScannerService {
 
         UrlScanResponse unknown = new UrlScanResponse(
                 "UNKNOWN",
-                "Async scan timed out or failed",
+                "Scan failed due to provider timeout or processing error",
                 normalized,
-                40,
-                Map.of("malicious", 0, "suspicious", 40, "unknown", 100),
-                Map.of("overall", "MEDIUM", "confidence", "LOW"),
-                List.of("Async scan failed"),
-                List.of("Fallback status is UNKNOWN"),
+                0,
+                Map.of("malware", 0, "phishing", 0, "spam", 0, "piracy", 0, "redirect", 0, "domain", 0),
+                Map.of("malware", "LOW", "phishing", "LOW", "spam", "LOW", "piracy", "LOW", "redirect", "LOW", "domain", "LOW"),
+                List.of("Async pipeline failed"),
+                List.of("External provider timeout or failure"),
                 List.of(normalized),
                 normalized,
                 List.of(),
@@ -612,12 +838,13 @@ public class UrlScannerService {
                 "",
                 ""
         );
-        completeJob(jobId, unknown);
+        unknown.setVerdict("UNKNOWN");
+        completeJob(scanId, unknown);
         log.warn("Async scan failed for {}: {}", maskUrl(normalized), root.getMessage());
     }
 
-    private void completeJob(String jobId, UrlScanResponse response) {
-        AsyncScanJob job = asyncJobs.get(jobId);
+    private void completeJob(String scanId, UrlScanResponse response) {
+        AsyncScanJob job = asyncJobs.get(scanId);
         if (job == null) {
             return;
         }
@@ -648,13 +875,7 @@ public class UrlScannerService {
     private String maskUrl(String url) {
         try {
             URI uri = URI.create(url);
-            StringBuilder sb = new StringBuilder();
-            sb.append(uri.getScheme()).append("://").append(uri.getHost());
-            if (uri.getPort() > 0) {
-                sb.append(":").append(uri.getPort());
-            }
-            sb.append(uri.getPath() == null ? "" : uri.getPath());
-            return sb.toString();
+            return uri.getScheme() + "://" + uri.getHost() + (uri.getPath() == null ? "" : uri.getPath());
         } catch (Exception ex) {
             return "[invalid-url]";
         }
@@ -664,22 +885,26 @@ public class UrlScannerService {
         return new ArrayList<>(new LinkedHashSet<>(values));
     }
 
-    private static class AggregatedSignals {
-        private int maliciousScore;
-        private int suspiciousScore;
-        private boolean unknownSignals;
+    private static class ScoreState {
+        private int malwareScore;
+        private int phishingScore;
+        private int spamScore;
+        private int piracyScore;
+        private int redirectScore;
+        private int domainScore;
+        private boolean apiFailureSignals;
         private final List<String> checksPerformed = new ArrayList<>();
         private final List<String> reasons = new ArrayList<>();
     }
 
     private static class GoogleSafeBrowsingResult {
-        private final boolean malicious;
-        private final boolean suspicious;
+        private final boolean malware;
+        private final boolean phishing;
         private final boolean externalError;
 
-        private GoogleSafeBrowsingResult(boolean malicious, boolean suspicious, boolean externalError) {
-            this.malicious = malicious;
-            this.suspicious = suspicious;
+        private GoogleSafeBrowsingResult(boolean malware, boolean phishing, boolean externalError) {
+            this.malware = malware;
+            this.phishing = phishing;
             this.externalError = externalError;
         }
 
@@ -726,6 +951,7 @@ public class UrlScannerService {
         private String pageTitle;
         private String screenshotUrl;
         private boolean externalError;
+        private String scanStatus;
 
         private static UrlscanBehavior empty(String url) {
             UrlscanBehavior behavior = new UrlscanBehavior();
@@ -736,31 +962,40 @@ public class UrlScannerService {
             behavior.pageTitle = "";
             behavior.screenshotUrl = "";
             behavior.externalError = false;
+            behavior.scanStatus = "COMPLETED";
             return behavior;
         }
 
         private static UrlscanBehavior externalFailure(String url) {
             UrlscanBehavior behavior = empty(url);
             behavior.externalError = true;
+            behavior.scanStatus = "FAILED";
             return behavior;
         }
 
         private static UrlscanBehavior timeoutFailure(String url) {
             UrlscanBehavior behavior = empty(url);
             behavior.externalError = true;
+            behavior.scanStatus = "TIMEOUT";
+            return behavior;
+        }
+
+        private static UrlscanBehavior skipped(String url) {
+            UrlscanBehavior behavior = empty(url);
+            behavior.scanStatus = "SKIPPED";
             return behavior;
         }
     }
 
     private static class AsyncScanJob {
-        private final String jobId;
+        private final String scanId;
         private volatile String status;
         private volatile UrlScanResponse result;
         private volatile String errorMessage;
         private volatile long completedAtMs;
 
-        private AsyncScanJob(String jobId) {
-            this.jobId = jobId;
+        private AsyncScanJob(String scanId) {
+            this.scanId = scanId;
             this.status = "PENDING";
             this.result = null;
             this.errorMessage = null;

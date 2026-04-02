@@ -1,7 +1,7 @@
 import React from "react";
 import { motion as Motion } from "framer-motion";
 
-const ScreenshotPanel = ({ screenshotUrl }) => {
+const ScreenshotPanel = ({ screenshotUrl, isProcessing = false }) => {
   return (
     <Motion.section
       initial={{ opacity: 0, y: 20 }}
@@ -32,6 +32,8 @@ const ScreenshotPanel = ({ screenshotUrl }) => {
             Open Full Screenshot
           </a>
         </>
+      ) : isProcessing ? (
+        <p className="mt-4 text-sm text-slate-300">Screenshot processing in urlscan...</p>
       ) : (
         <p className="mt-4 text-sm text-slate-300">No screenshot available for this scan.</p>
       )}

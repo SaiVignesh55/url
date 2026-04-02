@@ -85,14 +85,18 @@ const UrlScannerPage = () => {
 
   const visibleReasons = reasons.filter((item) => !item.startsWith("Screenshot:"));
 
-  const finalScore = Math.max(
-    0,
-    Math.min(result?.finalScore ?? result?.riskScore ?? 0, 100)
-  );
-  const status = result?.status || "";
+  const finalScore = Math.max(0, Math.min(result?.finalScore ?? result?.riskScore ?? 0, 100));
+  const status = result?.verdict || result?.status || "";
   const message = result?.message || "";
   const scannedUrl = result?.scannedUrl || "";
-  const breakdown = result?.breakdown || {};
+  const breakdown = {
+    malware: Number.isFinite(result?.malwareScore) ? result.malwareScore : (result?.breakdown?.malware || 0),
+    phishing: Number.isFinite(result?.phishingScore) ? result.phishingScore : (result?.breakdown?.phishing || 0),
+    spam: Number.isFinite(result?.spamScore) ? result.spamScore : (result?.breakdown?.spam || 0),
+    piracy: Number.isFinite(result?.piracyScore) ? result.piracyScore : (result?.breakdown?.piracy || 0),
+    redirect: Number.isFinite(result?.redirectScore) ? result.redirectScore : (result?.breakdown?.redirect || 0),
+    domain: Number.isFinite(result?.domainScore) ? result.domainScore : (result?.breakdown?.domain || 0),
+  };
   const categoryLabels = result?.categoryLabels || {};
   const checksPerformed = Array.isArray(result?.checksPerformed) ? result.checksPerformed : [];
   const redirectChain = Array.isArray(result?.redirectChain) ? result.redirectChain : [];
@@ -111,8 +115,8 @@ const UrlScannerPage = () => {
       { key: "phishing", title: "Phishing" },
       { key: "piracy", title: "Piracy" },
       { key: "spam", title: "Spam" },
-      { key: "redirectRisk", title: "Redirect Risk" },
-      { key: "domainRisk", title: "Domain Risk" },
+      { key: "redirect", title: "Redirect Risk" },
+      { key: "domain", title: "Domain Risk" },
     ],
     []
   );
@@ -448,7 +452,7 @@ const UrlScannerPage = () => {
               copiedFinal={copiedFinal}
             />
 
-            <ScreenshotPanel screenshotUrl={parsedScreenshotUrl} />
+            <ScreenshotPanel screenshotUrl={parsedScreenshotUrl} isProcessing={loading} />
 
             <ReasonsList reasons={visibleReasons} />
           </Motion.div>
