@@ -6,39 +6,31 @@ import CategoryCard from "./UrlScanner/CategoryCard";
 import BehaviorPanel from "./UrlScanner/BehaviorPanel";
 import ScreenshotPanel from "./UrlScanner/ScreenshotPanel";
 import ReasonsList from "./UrlScanner/ReasonsList";
+import { scannerApi } from "../api/api";
 
-const ASYNC_SCAN_URL = "http://localhost:9000/api/scan/async";
-const SYNC_SCAN_URL = "http://localhost:9000/api/scan";
 const POLL_INTERVAL_MS = 2000;
-const POLL_TIMEOUT_MS = 20000;
-const MAX_POLL_ATTEMPTS = POLL_TIMEOUT_MS / POLL_INTERVAL_MS;
+const MAX_POLL_ATTEMPTS = 10;
 
 const UrlScannerPage = () => {
   const navigate = useNavigate();
   const [url, setUrl] = useState("");
-  const [jobId, setJobId] = useState("");
+  const [scanId, setScanId] = useState("");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [pollAttempt, setPollAttempt] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [fallbackMode, setFallbackMode] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copiedFinal, setCopiedFinal] = useState(false);
   const backendBaseUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:9000";
 
   const pollIntervalRef = useRef(null);
-  const pollTimeoutRef = useRef(null);
   const elapsedTimerRef = useRef(null);
 
   const clearPollingTimers = () => {
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
-    }
-    if (pollTimeoutRef.current) {
-      clearTimeout(pollTimeoutRef.current);
-      pollTimeoutRef.current = null;
     }
     if (elapsedTimerRef.current) {
       clearInterval(elapsedTimerRef.current);
@@ -49,13 +41,12 @@ const UrlScannerPage = () => {
   const clearAll = () => {
     clearPollingTimers();
     setUrl("");
-    setJobId("");
+    setScanId("");
     setResult(null);
     setError("");
     setLoading(false);
     setPollAttempt(0);
     setElapsedSeconds(0);
-    setFallbackMode(false);
     setCopied(false);
     setCopiedFinal(false);
   };
@@ -83,22 +74,16 @@ const UrlScannerPage = () => {
     };
   }, [loading]);
 
-  const reasons = useMemo(
-    () => (Array.isArray(result?.reasons) ? result.reasons : []),
-    [result?.reasons]
-  );
+  const reasons = Array.isArray(result?.reasons) ? result.reasons : [];
 
-  const parsedScreenshotUrl = useMemo(() => {
+  const parsedScreenshotUrl = (() => {
     if (result?.screenshotUrl) return result.screenshotUrl;
     const screenshotReason = reasons.find((item) => item.startsWith("Screenshot:"));
     if (!screenshotReason) return "";
     return screenshotReason.replace("Screenshot:", "").trim();
-  }, [reasons, result?.screenshotUrl]);
+  })();
 
-  const visibleReasons = useMemo(
-    () => reasons.filter((item) => !item.startsWith("Screenshot:")),
-    [reasons]
-  );
+  const visibleReasons = reasons.filter((item) => !item.startsWith("Screenshot:"));
 
   const finalScore = Math.max(
     0,
@@ -109,18 +94,15 @@ const UrlScannerPage = () => {
   const scannedUrl = result?.scannedUrl || "";
   const breakdown = result?.breakdown || {};
   const categoryLabels = result?.categoryLabels || {};
-  const checksPerformed = useMemo(
-    () => (Array.isArray(result?.checksPerformed) ? result.checksPerformed : []),
-    [result?.checksPerformed]
-  );
+  const checksPerformed = Array.isArray(result?.checksPerformed) ? result.checksPerformed : [];
   const redirectChain = Array.isArray(result?.redirectChain) ? result.redirectChain : [];
   const finalUrl = result?.finalUrl || "";
-  const contactedDomains = useMemo(() => {
+  const contactedDomains = (() => {
     if (Array.isArray(result?.domains) && result.domains.length > 0) {
       return result.domains;
     }
     return Array.isArray(result?.contactedDomains) ? result.contactedDomains : [];
-  }, [result?.contactedDomains, result?.domains]);
+  })();
   const totalRequests = Number.isFinite(result?.totalRequests) ? result.totalRequests : 0;
 
   const categoryItems = useMemo(
@@ -135,52 +117,15 @@ const UrlScannerPage = () => {
     []
   );
 
-  const partialAnalysis = useMemo(() => {
+  const partialAnalysis = (() => {
     const merged = [...reasons, ...checksPerformed].join(" ").toLowerCase();
     return merged.includes("partial") || merged.includes("unavailable") || merged.includes("fallback");
-  }, [checksPerformed, reasons]);
+  })();
 
-  const runSyncScan = async (urlToScan) => {
-    clearPollingTimers();
-    setJobId("");
-    setPollAttempt(0);
-    setFallbackMode(true);
-    setCopied(false);
-    setCopiedFinal(false);
+  const isTerminalStatus = (value) =>
+    ["SAFE", "MALICIOUS", "SUSPICIOUS", "UNKNOWN"].includes((value || "").toUpperCase());
 
-    try {
-      const response = await fetch(SYNC_SCAN_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: urlToScan }),
-      });
-
-      let data;
-      try {
-        data = await response.json();
-      } catch {
-        data = null;
-      }
-
-      if (!response.ok) {
-        setError(data?.message || "Scan failed. Please try again.");
-        setResult(data || null);
-        return;
-      }
-
-      setResult(data || null);
-      if (data?.status === "INVALID_REQUEST") {
-        setError(data?.message || "Invalid request.");
-      }
-    } catch {
-      setError("Unable to reach scanner service. Please check backend and try again.");
-    } finally {
-      setLoading(false);
-      setElapsedSeconds(0);
-    }
-  };
-
-  const pollScanStatus = (currentJobId, urlToScan) => {
+  const pollScanStatus = (currentScanId) => {
     let attempts = 0;
 
     const pollOnce = async () => {
@@ -188,61 +133,50 @@ const UrlScannerPage = () => {
       setPollAttempt(attempts);
 
       try {
-        const response = await fetch(`${ASYNC_SCAN_URL}/${currentJobId}`);
+        const response = await scannerApi.getScanStatus(currentScanId);
+        const data = response?.data || null;
 
-        let data;
-        try {
-          data = await response.json();
-        } catch {
-          data = null;
-        }
-
-        if (!response.ok) {
-          await runSyncScan(urlToScan);
+        if (!response || response.status < 200 || response.status >= 300) {
+          clearPollingTimers();
+          setLoading(false);
+          setElapsedSeconds(0);
+          setError(data?.message || "Failed to fetch scan status.");
           return;
         }
 
-        if (data?.status === "COMPLETED") {
+        const nextStatus = (data?.status || "").toUpperCase();
+        if (isTerminalStatus(nextStatus)) {
           clearPollingTimers();
           setLoading(false);
-          setPollAttempt(0);
           setElapsedSeconds(0);
-          setResult(data?.result || null);
-          setFallbackMode(false);
-
-          if (!data?.result) {
-            setError("Scan completed but no result received.");
-          } else if (data?.result?.status === "INVALID_REQUEST") {
-            setError(data?.result?.message || "Invalid request.");
+          setPollAttempt(0);
+          setResult(data?.result || { status: nextStatus, message: data?.errorMessage || "Scan completed" });
+          if (!data?.result && data?.errorMessage) {
+            setError(data?.errorMessage);
           }
           return;
         }
 
-        if (data?.status === "NOT_SUPPORTED") {
-          await runSyncScan(urlToScan);
+        if (attempts >= MAX_POLL_ATTEMPTS) {
+          clearPollingTimers();
+          setLoading(false);
+          setElapsedSeconds(0);
+          setError("Scan timed out after maximum polling attempts.");
         }
-      } catch {
-        await runSyncScan(urlToScan);
+      } catch (error) {
+        clearPollingTimers();
+        setLoading(false);
+        setElapsedSeconds(0);
+        setError(error?.response?.data?.message || "Unable to reach scanner status endpoint.");
       }
     };
 
     pollOnce();
-
-    pollIntervalRef.current = setInterval(() => {
-      pollOnce();
-    }, POLL_INTERVAL_MS);
-
-    pollTimeoutRef.current = setTimeout(() => {
-      clearPollingTimers();
-      setLoading(false);
-      setPollAttempt(0);
-      setElapsedSeconds(0);
-      setError("Scan taking too long");
-    }, POLL_TIMEOUT_MS);
+    pollIntervalRef.current = setInterval(pollOnce, POLL_INTERVAL_MS);
   };
 
   const handleScan = async (event) => {
-    event.preventDefault();
+    event?.preventDefault();
 
     const normalizedInput = normalizeScannerInput(url);
     if (!normalizedInput) {
@@ -253,42 +187,30 @@ const UrlScannerPage = () => {
     clearPollingTimers();
     setLoading(true);
     setError("");
-    setJobId("");
+    setScanId("");
     setPollAttempt(0);
     setElapsedSeconds(0);
-    setFallbackMode(false);
     setCopied(false);
     setCopiedFinal(false);
 
     try {
-      const response = await fetch(ASYNC_SCAN_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: normalizedInput }),
-      });
+      const response = await scannerApi.submitScan(normalizedInput);
+      const data = response?.data || null;
 
-      let data;
-      try {
-        data = await response.json();
-      } catch {
-        data = null;
-      }
-
-      if (!response.ok) {
-        await runSyncScan(normalizedInput);
+      const newScanId = data?.scanId || "";
+      if (!newScanId) {
+        setLoading(false);
+        setElapsedSeconds(0);
+        setError("Scan created without scanId. Please try again.");
         return;
       }
 
-      const newJobId = data?.jobId || "";
-      if (!newJobId) {
-        await runSyncScan(normalizedInput);
-        return;
-      }
-
-      setJobId(newJobId);
-      pollScanStatus(newJobId, normalizedInput);
-    } catch {
-      await runSyncScan(normalizedInput);
+      setScanId(newScanId);
+      pollScanStatus(newScanId);
+    } catch (error) {
+      setLoading(false);
+      setElapsedSeconds(0);
+      setError(error?.response?.data?.message || "Unable to reach scanner service. Please check backend and try again.");
     }
   };
 
@@ -309,7 +231,7 @@ const UrlScannerPage = () => {
   const cancelScan = () => {
     clearPollingTimers();
     setLoading(false);
-    setJobId("");
+    setScanId("");
     setPollAttempt(0);
     setElapsedSeconds(0);
     setError("Scan cancelled by user. Previous result is still shown.");
@@ -440,10 +362,10 @@ const UrlScannerPage = () => {
               <span className="inline-block h-5 w-5 rounded-full border-2 border-blue-300 border-t-blue-700 animate-spin" />
               <p className="text-blue-200 text-sm font-semibold">
                 Scanning in progress...
-                {jobId ? ` (Job: ${jobId})` : ""}
+                {scanId ? ` (Scan: ${scanId})` : ""}
               </p>
             </div>
-            {jobId && (
+            {scanId && (
               <>
                 <p className="text-blue-200 text-xs mt-1">
                   Poll attempt: {Math.min(pollAttempt, MAX_POLL_ATTEMPTS)}/{MAX_POLL_ATTEMPTS}
@@ -456,11 +378,6 @@ const UrlScannerPage = () => {
                   />
                 </div>
               </>
-            )}
-            {fallbackMode && (
-               <p className="text-amber-200 text-xs mt-2 font-semibold">
-                Fallback mode active: async scan unavailable, running direct scan.
-              </p>
             )}
           </div>
         )}

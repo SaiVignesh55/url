@@ -6,7 +6,6 @@ import lombok.Data;
 @Data
 @AllArgsConstructor
 public class UrlScanAsyncSubmitResponse {
-    private String jobId;
+    private String scanId;
     private String status;
 }
-

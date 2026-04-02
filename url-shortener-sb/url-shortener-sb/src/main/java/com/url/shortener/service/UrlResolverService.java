@@ -1,121 +1,102 @@
 package com.url.shortener.service;
 
+import com.url.shortener.exception.InvalidUrlException;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
-import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.URL;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
 @Service
+@RequiredArgsConstructor
 public class UrlResolverService {
 
-    private static final int MAX_REDIRECTS = 5;
-    private static final int CONNECT_TIMEOUT_MS = 5000;
-    private static final int READ_TIMEOUT_MS = 5000;
+    @Value("${url.scan.redirect.max-depth:10}")
+    private int maxRedirects;
+
+    private final RestTemplate scannerRestTemplate;
+    private final UrlNormalizationService urlNormalizationService;
+    private final SsrfProtectionService ssrfProtectionService;
+    private final HttpRetryService retryService;
 
     public ResolvedResult resolveUrl(String inputUrl) {
-        String current = normalize(inputUrl);
-        if (current.isBlank()) {
-            return new ResolvedResult(current, List.of());
-        }
+        UrlNormalizationService.NormalizedUrl normalized = urlNormalizationService.normalizeAndValidate(inputUrl);
+        URI current = normalized.uri();
 
         List<String> chain = new ArrayList<>();
-        chain.add(current);
-        Set<String> visited = new HashSet<>();
-        visited.add(current);
+        Set<String> visited = new LinkedHashSet<>();
+        chain.add(current.toString());
+        visited.add(current.toString());
 
-        for (int i = 0; i < MAX_REDIRECTS; i++) {
+        for (int hop = 0; hop < Math.max(1, maxRedirects); hop++) {
+            ssrfProtectionService.assertPublicDestination(current);
             String location = readLocationHeader(current);
             if (location == null || location.isBlank()) {
-                return new ResolvedResult(current, chain);
+                return new ResolvedResult(current.toString(), chain, false, false);
             }
 
-            String next = normalize(toAbsoluteUrl(current, location));
-            if (next.isBlank()) {
-                return new ResolvedResult(current, chain);
-            }
+            URI next = current.resolve(location);
+            UrlNormalizationService.NormalizedUrl nextNormalized = urlNormalizationService.normalizeAndValidate(next.toString());
+            current = nextNormalized.uri();
 
-            chain.add(next);
-            if (!visited.add(next)) {
-                return new ResolvedResult(next, chain);
-            }
+            ssrfProtectionService.assertPublicDestination(current);
 
-            current = next;
+            String canonical = current.toString();
+            chain.add(canonical);
+            if (!visited.add(canonical)) {
+                return new ResolvedResult(canonical, chain, true, false);
+            }
         }
 
-        return new ResolvedResult(current, chain);
+        return new ResolvedResult(current.toString(), chain, false, true);
     }
 
-    public String resolveFinalUrl(String inputUrl) {
-        return resolveUrl(inputUrl).finalUrl();
+    private String readLocationHeader(URI current) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("User-Agent", "UrlScanner/2.0");
+        HttpEntity<Void> request = new HttpEntity<>(headers);
+
+        ResponseEntity<String> response = executeRequest(current, HttpMethod.HEAD, request);
+        if (isRedirect(response.getStatusCode())) {
+            return response.getHeaders().getFirst(HttpHeaders.LOCATION);
+        }
+
+        if (response.getStatusCode().value() == 405 || response.getStatusCode().value() == 501) {
+            ResponseEntity<String> fallback = executeRequest(current, HttpMethod.GET, request);
+            if (isRedirect(fallback.getStatusCode())) {
+                return fallback.getHeaders().getFirst(HttpHeaders.LOCATION);
+            }
+        }
+
+        return null;
     }
 
-    private String readLocationHeader(String url) {
-        HttpURLConnection connection = null;
+    private ResponseEntity<String> executeRequest(URI uri, HttpMethod method, HttpEntity<Void> request) {
         try {
-            connection = (HttpURLConnection) new URL(url).openConnection();
-            connection.setRequestMethod("HEAD");
-            connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
-            connection.setReadTimeout(READ_TIMEOUT_MS);
-            connection.setInstanceFollowRedirects(false);
-            connection.setRequestProperty("User-Agent", "UrlScanner/1.0");
-
-            int status = connection.getResponseCode();
-            if (isRedirectStatus(status)) {
-                return connection.getHeaderField("Location");
-            }
-            return null;
+            return retryService.execute(() -> scannerRestTemplate.exchange(uri, method, request, String.class));
         } catch (Exception ex) {
-            // Fail safe: scanner should continue even if resolver cannot resolve.
-            return null;
-        } finally {
-            if (connection != null) {
-                connection.disconnect();
-            }
+            return ResponseEntity.ok().build();
         }
     }
 
-    private boolean isRedirectStatus(int status) {
-        return status == HttpURLConnection.HTTP_MOVED_PERM
-                || status == HttpURLConnection.HTTP_MOVED_TEMP
-                || status == HttpURLConnection.HTTP_SEE_OTHER
-                || status == 307
-                || status == 308;
+    private boolean isRedirect(HttpStatusCode statusCode) {
+        int status = statusCode.value();
+        return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
     }
 
-    private String toAbsoluteUrl(String baseUrl, String location) {
-        try {
-            URI base = URI.create(baseUrl);
-            URI next = base.resolve(location);
-            return next.toString();
-        } catch (Exception ex) {
-            return location;
-        }
-    }
-
-    private String normalize(String value) {
-        if (value == null) {
-            return "";
-        }
-
-        String normalized = value.trim();
-        if (!normalized.isBlank()
-                && !normalized.toLowerCase().startsWith("http://")
-                && !normalized.toLowerCase().startsWith("https://")) {
-            normalized = "https://" + normalized;
-        }
-
-        if (normalized.endsWith("/") && normalized.length() > "https://".length()) {
-            normalized = normalized.substring(0, normalized.length() - 1);
-        }
-        return normalized;
-    }
-
-    public record ResolvedResult(String finalUrl, List<String> chain) {
+    public record ResolvedResult(String finalUrl,
+                                 List<String> chain,
+                                 boolean loopDetected,
+                                 boolean maxDepthReached) {
     }
 }
-

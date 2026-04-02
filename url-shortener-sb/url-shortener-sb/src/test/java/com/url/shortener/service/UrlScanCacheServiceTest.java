@@ -21,6 +21,7 @@ class UrlScanCacheServiceTest {
         ReflectionTestUtils.setField(cacheService, "cacheEnabled", true);
         ReflectionTestUtils.setField(cacheService, "ttlSeconds", 60L);
         ReflectionTestUtils.setField(cacheService, "maxSize", 500);
+        cacheService.init();
     }
 
     @Test

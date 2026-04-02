@@ -1,18 +1,18 @@
 package com.url.shortener.service;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.url.shortener.dtos.UrlScanResponse;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class UrlScanCacheService {
-
-    private final Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
 
     @Value("${url.scan.cache.enabled:true}")
     private boolean cacheEnabled;
@@ -23,51 +23,37 @@ public class UrlScanCacheService {
     @Value("${url.scan.cache.max-size:500}")
     private int maxSize;
 
+    private Cache<String, UrlScanResponse> cache;
+
+    @PostConstruct
+    void init() {
+        cache = Caffeine.newBuilder()
+                .maximumSize(Math.max(1, maxSize))
+                .expireAfterWrite(Math.max(1, ttlSeconds), TimeUnit.SECONDS)
+                .build();
+    }
+
     public UrlScanResponse get(String key) {
         if (!cacheEnabled || key == null || key.isBlank()) {
             return null;
         }
-
-        CacheEntry entry = cache.get(key);
-        if (entry == null) {
-            return null;
-        }
-
-        if (isExpired(entry)) {
-            cache.remove(key);
-            return null;
-        }
-
-        return copyResponse(entry.response());
+        UrlScanResponse response = cache.getIfPresent(key);
+        return response == null ? null : copyResponse(response);
     }
 
     public void put(String key, UrlScanResponse response) {
-        if (!cacheEnabled || key == null || key.isBlank() || response == null || ttlSeconds <= 0) {
+        if (!cacheEnabled || key == null || key.isBlank() || response == null) {
             return;
         }
-
-        if (cache.size() >= Math.max(maxSize, 1)) {
-            evictOneEntry();
-        }
-
-        long expiresAt = System.currentTimeMillis() + (ttlSeconds * 1000);
-        cache.put(key, new CacheEntry(copyResponse(response), expiresAt));
+        cache.put(key, copyResponse(response));
     }
 
     public void clear() {
-        cache.clear();
-    }
-
-    private boolean isExpired(CacheEntry entry) {
-        return System.currentTimeMillis() > entry.expiresAtEpochMillis();
-    }
-
-    private void evictOneEntry() {
-        cache.keySet().stream().findFirst().ifPresent(cache::remove);
+        cache.invalidateAll();
     }
 
     private UrlScanResponse copyResponse(UrlScanResponse source) {
-        return new UrlScanResponse(
+        UrlScanResponse copied = new UrlScanResponse(
                 source.getStatus(),
                 source.getMessage(),
                 source.getScannedUrl(),
@@ -83,8 +69,7 @@ public class UrlScanCacheService {
                 source.getPageTitle(),
                 source.getScreenshotUrl()
         );
-    }
-
-    private record CacheEntry(UrlScanResponse response, long expiresAtEpochMillis) {
+        copied.setTotalRequests(source.getTotalRequests());
+        return copied;
     }
 }

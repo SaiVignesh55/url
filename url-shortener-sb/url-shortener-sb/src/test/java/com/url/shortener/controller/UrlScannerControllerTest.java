@@ -9,8 +9,6 @@ import com.url.shortener.service.UrlScannerService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration;
-import org.springframework.boot.autoconfigure.security.servlet.SecurityFilterAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.http.HttpStatus;
@@ -27,19 +25,15 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(
-        controllers = UrlScannerController.class,
-        excludeAutoConfiguration = {
-                SecurityAutoConfiguration.class,
-                SecurityFilterAutoConfiguration.class
-        }
-)
-@AutoConfigureMockMvc(addFilters = false)
+@WebMvcTest(controllers = UrlScannerController.class)
+@AutoConfigureMockMvc
 class UrlScannerControllerTest {
 
     @Autowired
@@ -64,12 +58,14 @@ class UrlScannerControllerTest {
         UrlScanRequest request = new UrlScanRequest();
         request.setUrl("  https://example.com  ");
 
-        mockMvc.perform(post("/api/scan/async")
+        mockMvc.perform(post("/api/scan")
+                        .with(user("tester").roles("USER"))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.jobId").value("job-123"))
-                .andExpect(jsonPath("$.status").value("PENDING"));
+                                .andExpect(jsonPath("$.scanId").value("job-123"))
+                .andExpect(jsonPath("$.status").value("IN_PROGRESS"));
 
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
         verify(urlScannerService, times(1)).submitAsyncScan(captor.capture());
@@ -81,12 +77,13 @@ class UrlScannerControllerTest {
         UrlScanRequest request = new UrlScanRequest();
         request.setUrl("   ");
 
-        mockMvc.perform(post("/api/scan/async")
+        mockMvc.perform(post("/api/scan")
+                        .with(user("tester").roles("USER"))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.jobId").doesNotExist())
-                .andExpect(jsonPath("$.status").value("INVALID_REQUEST"));
+                .andExpect(jsonPath("$.status").value(400));
 
         verify(urlScannerService, never()).submitAsyncScan(anyString());
     }
@@ -100,18 +97,14 @@ class UrlScannerControllerTest {
                 0,
                 List.of("No threat match found")
         );
-        UrlScanAsyncStatusResponse statusResponse = new UrlScanAsyncStatusResponse(
-                "job-123",
-                "COMPLETED",
-                result,
-                null
-        );
+        UrlScanAsyncStatusResponse statusResponse = new UrlScanAsyncStatusResponse("job-123", "COMPLETED", result, null);
         when(urlScannerService.getAsyncScanStatus("job-123")).thenReturn(statusResponse);
 
-        mockMvc.perform(get("/api/scan/async/job-123"))
+        mockMvc.perform(get("/api/status/job-123")
+                        .with(user("tester").roles("USER")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.jobId").value("job-123"))
-                .andExpect(jsonPath("$.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.scanId").value("job-123"))
+                .andExpect(jsonPath("$.status").value("SAFE"))
                 .andExpect(jsonPath("$.result.scannedUrl").value("https://example.com"));
     }
 
@@ -120,7 +113,8 @@ class UrlScannerControllerTest {
         when(urlScannerService.getAsyncScanStatus("missing-job"))
                 .thenThrow(new ResponseStatusException(HttpStatus.NOT_FOUND, "Async scan job not found"));
 
-        mockMvc.perform(get("/api/scan/async/missing-job"))
+        mockMvc.perform(get("/api/status/missing-job")
+                        .with(user("tester").roles("USER")))
                 .andExpect(status().isNotFound());
     }
 
@@ -132,7 +126,9 @@ class UrlScannerControllerTest {
         UrlScanRequest request = new UrlScanRequest();
         request.setUrl("https://example.com");
 
-        mockMvc.perform(post("/api/scan/async")
+        mockMvc.perform(post("/api/scan")
+                        .with(user("tester").roles("USER"))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isTooManyRequests());
