@@ -163,6 +163,24 @@ const UrlScannerPage = () => {
 
         if (attempts >= MAX_POLL_ATTEMPTS) {
           clearPollingTimers();
+          try {
+            const finalResponse = await scannerApi.getScanStatus(currentScanId);
+            const finalData = finalResponse?.data || null;
+            const finalStatus = (finalData?.status || "").toUpperCase();
+            if (isTerminalStatus(finalStatus)) {
+              setLoading(false);
+              setElapsedSeconds(0);
+              setPollAttempt(0);
+              setResult(finalData?.result || { status: finalStatus, message: finalData?.errorMessage || "Scan completed" });
+              if (!finalData?.result && finalData?.errorMessage) {
+                setError(finalData.errorMessage);
+              }
+              return;
+            }
+          } catch {
+            // Ignore and surface timeout message below.
+          }
+
           setLoading(false);
           setElapsedSeconds(0);
           setError("Scan timed out after maximum polling attempts.");

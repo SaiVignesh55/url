@@ -38,11 +38,17 @@ public class UrlScanCacheService {
             return null;
         }
         UrlScanResponse response = cache.getIfPresent(key);
-        return response == null ? null : copyResponse(response);
+        if (response == null || !isCacheable(response)) {
+            if (response != null) {
+                cache.invalidate(key);
+            }
+            return null;
+        }
+        return copyResponse(response);
     }
 
     public void put(String key, UrlScanResponse response) {
-        if (!cacheEnabled || key == null || key.isBlank() || response == null) {
+        if (!cacheEnabled || key == null || key.isBlank() || response == null || !isCacheable(response)) {
             return;
         }
         cache.put(key, copyResponse(response));
@@ -71,5 +77,16 @@ public class UrlScanCacheService {
         );
         copied.setTotalRequests(source.getTotalRequests());
         return copied;
+    }
+
+    private boolean isCacheable(UrlScanResponse response) {
+        if (response.getStatus() == null) {
+            return false;
+        }
+        String status = response.getStatus().toUpperCase();
+        if (!("SAFE".equals(status) || "SUSPICIOUS".equals(status) || "MALICIOUS".equals(status))) {
+            return false;
+        }
+        return response.getScannedUrl() != null && !response.getScannedUrl().isBlank();
     }
 }

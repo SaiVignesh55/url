@@ -37,6 +37,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 import static org.springframework.http.HttpStatus.TOO_MANY_REQUESTS;
@@ -83,6 +85,9 @@ public class UrlScannerService {
     @Value("${urlscan.poll.delay-ms:1500}")
     private long urlscanPollDelayMs;
 
+    @Value("${urlscan.wait-ms:5000}")
+    private long urlscanWaitMs;
+
     @Value("${url.scan.async.timeout-ms:20000}")
     private long asyncTimeoutMs;
 
@@ -118,9 +123,11 @@ public class UrlScannerService {
         log.debug("Pipeline step1 normalize complete: {}", maskUrl(normalized.normalizedUrl()));
 
         UrlScanResponse cached = urlScanCacheService.get(normalized.normalizedUrl());
-        if (cached != null) {
+        if (isCacheableResult(cached)) {
             log.debug("Cache hit for {}", maskUrl(normalized.normalizedUrl()));
             return cached;
+        } else if (cached != null) {
+            log.debug("Ignoring non-cacheable cached result for {} with status={}", maskUrl(normalized.normalizedUrl()), cached.getStatus());
         }
 
         // STEP 2: resolve redirects
@@ -142,17 +149,22 @@ public class UrlScannerService {
 
         UrlscanBehavior behavior;
         try {
-            behavior = urlscanFuture.get();
+            behavior = urlscanFuture.get(Math.max(1000, urlscanWaitMs), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException ex) {
+            log.debug("urlscan did not complete within wait window for {}. Continuing with core signals.", maskUrl(finalUrl));
+            behavior = UrlscanBehavior.timeoutFailure(finalUrl);
         } catch (Exception ex) {
             behavior = UrlscanBehavior.externalFailure(finalUrl);
         }
         applyUrlscanSignals(state, behavior);
 
         int finalScore = calculateFinalScore(state);
-        String verdict = determineVerdict(finalScore, state.apiFailureSignals);
+        String verdict = determineVerdict(finalScore, state);
 
         UrlScanResponse response = buildResponse(normalized.normalizedUrl(), finalUrl, chain, behavior, state, finalScore, verdict);
-        urlScanCacheService.put(normalized.normalizedUrl(), response);
+        if (isCacheableResult(response)) {
+            urlScanCacheService.put(normalized.normalizedUrl(), response);
+        }
 
         log.info("Scan completed: url={}, verdict={}, score={}", maskUrl(normalized.normalizedUrl()), verdict, finalScore);
         log.debug("Category scores malware={}, phishing={}, spam={}, piracy={}, redirect={}, domain={}",
@@ -202,8 +214,11 @@ public class UrlScannerService {
             log.debug("GSB result for {} => malware={}, phishing={}, externalError={}", maskUrl(normalizedHop.normalizedUrl()), gsb.malware, gsb.phishing, gsb.externalError);
 
             if (gsb.externalError) {
+                state.gsbFailed = true;
                 state.apiFailureSignals = true;
                 state.reasons.add("Google Safe Browsing unavailable");
+            } else {
+                state.gsbResponded = true;
             }
             if (gsb.malware) {
                 state.malwareScore = Math.max(state.malwareScore, 95);
@@ -220,9 +235,15 @@ public class UrlScannerService {
             log.debug("VirusTotal result for {} => malicious={}, suspicious={}, checked={}, pending={}",
                     maskUrl(normalizedHop.normalizedUrl()), vt.maliciousEngines, vt.suspiciousEngines, vt.checked, vt.analysisPending);
 
-            if (!vt.checked) {
+            if (vt.externalError) {
+                state.vtFailed = true;
                 state.apiFailureSignals = true;
-                state.reasons.add("VirusTotal analysis incomplete or unavailable");
+                state.reasons.add("VirusTotal unavailable");
+            } else {
+                state.vtResponded = true;
+                if (!vt.checked) {
+                    state.reasons.add("VirusTotal has no prior data yet; treated as neutral");
+                }
             }
             if (vt.maliciousEngines > 0) {
                 state.malwareScore = Math.max(state.malwareScore, 90);
@@ -253,7 +274,6 @@ public class UrlScannerService {
         state.checksPerformed.add("urlscan checked");
 
         if (behavior.externalError) {
-            state.apiFailureSignals = true;
             state.reasons.add("urlscan unavailable");
             return;
         }
@@ -336,17 +356,33 @@ public class UrlScannerService {
         return Math.max(0, Math.min(100, score));
     }
 
-    private String determineVerdict(int finalScore, boolean apiFailureSignals) {
-        if (apiFailureSignals && finalScore < 30) {
+    private String determineVerdict(int finalScore, ScoreState state) {
+        boolean coreApisFailed = state.gsbFailed && state.vtFailed;
+        if (coreApisFailed) {
+            log.debug("Verdict UNKNOWN because core APIs failed: gsbFailed={}, vtFailed={}", state.gsbFailed, state.vtFailed);
             return "UNKNOWN";
         }
         if (finalScore > 70) {
+            log.debug("Verdict MALICIOUS at score={} (gsbResponded={}, vtResponded={})", finalScore, state.gsbResponded, state.vtResponded);
             return "MALICIOUS";
         }
         if (finalScore >= 30) {
+            log.debug("Verdict SUSPICIOUS at score={} (gsbResponded={}, vtResponded={})", finalScore, state.gsbResponded, state.vtResponded);
             return "SUSPICIOUS";
         }
+        log.debug("Verdict SAFE at score={} (gsbResponded={}, vtResponded={})", finalScore, state.gsbResponded, state.vtResponded);
         return "SAFE";
+    }
+
+    private boolean isCacheableResult(UrlScanResponse response) {
+        if (response == null || response.getStatus() == null) {
+            return false;
+        }
+        String status = response.getStatus().toUpperCase();
+        if (!("SAFE".equals(status) || "SUSPICIOUS".equals(status) || "MALICIOUS".equals(status))) {
+            return false;
+        }
+        return response.getFinalScore() >= 0 && response.getScannedUrl() != null && !response.getScannedUrl().isBlank();
     }
 
     private UrlScanResponse buildResponse(String scannedUrl,
@@ -431,7 +467,7 @@ public class UrlScannerService {
         }
 
         String scanId = UUID.randomUUID().toString();
-        AsyncScanJob job = new AsyncScanJob(scanId);
+        AsyncScanJob job = new AsyncScanJob(scanId, url);
         asyncJobs.put(scanId, job);
 
         CompletableFuture
@@ -454,7 +490,20 @@ public class UrlScannerService {
         if (job == null) {
             throw new ResponseStatusException(NOT_FOUND, "Async scan job not found");
         }
+
+        if (job.isPending() && isJobTimedOut(job)) {
+            log.warn("Auto-finalizing stale scan job {} after timeout window", scanId);
+            completeUnknown(scanId, job.requestedUrl, new TimeoutException("Async scan exceeded timeout window"));
+            job = asyncJobs.get(scanId);
+        }
+
         return new UrlScanAsyncStatusResponse(job.scanId, job.status, job.result, job.errorMessage);
+    }
+
+    private boolean isJobTimedOut(AsyncScanJob job) {
+        long graceMs = 2000;
+        long ageMs = System.currentTimeMillis() - job.createdAtMs;
+        return ageMs >= Math.max(1000, asyncTimeoutMs + graceMs);
     }
 
     @Scheduled(fixedDelayString = "${url.scan.async.cleanup-interval-ms:60000}")
@@ -839,6 +888,21 @@ public class UrlScannerService {
                 ""
         );
         unknown.setVerdict("UNKNOWN");
+
+        try {
+            UrlScanResponse fallback = scanUrl(inputUrl);
+            if (fallback != null && !"UNKNOWN".equalsIgnoreCase(fallback.getStatus())) {
+                List<String> reasons = fallback.getReasons() == null ? new ArrayList<>() : new ArrayList<>(fallback.getReasons());
+                reasons.add("Async timeout recovered using fallback completion");
+                fallback.setReasons(dedupe(reasons));
+                completeJob(scanId, fallback);
+                log.info("Async timeout recovered for {} with status={} score={}", maskUrl(normalized), fallback.getStatus(), fallback.getFinalScore());
+                return;
+            }
+        } catch (Exception fallbackEx) {
+            log.debug("Fallback completion after async timeout failed for {}: {}", maskUrl(normalized), fallbackEx.getMessage());
+        }
+
         completeJob(scanId, unknown);
         log.warn("Async scan failed for {}: {}", maskUrl(normalized), root.getMessage());
     }
@@ -893,6 +957,10 @@ public class UrlScannerService {
         private int redirectScore;
         private int domainScore;
         private boolean apiFailureSignals;
+        private boolean gsbResponded;
+        private boolean gsbFailed;
+        private boolean vtResponded;
+        private boolean vtFailed;
         private final List<String> checksPerformed = new ArrayList<>();
         private final List<String> reasons = new ArrayList<>();
     }
@@ -918,28 +986,30 @@ public class UrlScannerService {
         private final int suspiciousEngines;
         private final boolean checked;
         private final boolean analysisPending;
+        private final boolean externalError;
 
-        private VirusTotalResult(int maliciousEngines, int suspiciousEngines, boolean checked, boolean analysisPending) {
+        private VirusTotalResult(int maliciousEngines, int suspiciousEngines, boolean checked, boolean analysisPending, boolean externalError) {
             this.maliciousEngines = maliciousEngines;
             this.suspiciousEngines = suspiciousEngines;
             this.checked = checked;
             this.analysisPending = analysisPending;
+            this.externalError = externalError;
         }
 
         private static VirusTotalResult checked(int malicious, int suspicious) {
-            return new VirusTotalResult(malicious, suspicious, true, false);
+            return new VirusTotalResult(malicious, suspicious, true, false, false);
         }
 
         private static VirusTotalResult notFound() {
-            return new VirusTotalResult(0, 0, false, false);
+            return new VirusTotalResult(0, 0, false, false, false);
         }
 
         private static VirusTotalResult pending() {
-            return new VirusTotalResult(0, 0, false, true);
+            return new VirusTotalResult(0, 0, false, true, false);
         }
 
         private static VirusTotalResult unavailable() {
-            return new VirusTotalResult(0, 0, false, true);
+            return new VirusTotalResult(0, 0, false, true, true);
         }
     }
 
@@ -989,13 +1059,17 @@ public class UrlScannerService {
 
     private static class AsyncScanJob {
         private final String scanId;
+        private final String requestedUrl;
+        private final long createdAtMs;
         private volatile String status;
         private volatile UrlScanResponse result;
         private volatile String errorMessage;
         private volatile long completedAtMs;
 
-        private AsyncScanJob(String scanId) {
+        private AsyncScanJob(String scanId, String requestedUrl) {
             this.scanId = scanId;
+            this.requestedUrl = requestedUrl;
+            this.createdAtMs = System.currentTimeMillis();
             this.status = "PENDING";
             this.result = null;
             this.errorMessage = null;
