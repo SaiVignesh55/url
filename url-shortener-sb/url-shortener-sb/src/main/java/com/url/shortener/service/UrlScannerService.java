@@ -31,6 +31,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -107,6 +108,7 @@ public class UrlScannerService {
     private final RestTemplate scannerRestTemplate;
     private final UrlResolverService urlResolverService;
     private final UrlScanCacheService urlScanCacheService;
+    private final UrlScanResultService urlScanResultService;
     private final UrlNormalizationService urlNormalizationService;
     private final SsrfProtectionService ssrfProtectionService;
     private final HttpRetryService retryService;
@@ -123,10 +125,25 @@ public class UrlScannerService {
         log.debug("Pipeline step1 normalize complete: {}", maskUrl(normalized.normalizedUrl()));
         boolean internalInput = urlResolverService.isInternalShortUrl(normalized.normalizedUrl());
         log.info("Scan input classification: url={}, type={}", maskUrl(normalized.normalizedUrl()), internalInput ? "internal" : "external");
+        System.out.println("SCAN REQUEST RECEIVED: " + normalized.normalizedUrl());
+
+        // DB-first cache check to avoid repeated third-party scanner calls.
+        Optional<UrlScanResponse> existingFromDb = urlScanResultService.findByScannedUrl(normalized.normalizedUrl());
+        if (existingFromDb.isPresent()) {
+            UrlScanResponse existing = existingFromDb.get();
+            log.info("DB cache hit for {} with status={}", maskUrl(normalized.normalizedUrl()), existing.getStatus());
+            System.out.println("Returning scan result from DB cache for URL: " + normalized.normalizedUrl());
+            if (isCacheableResult(existing)) {
+                urlScanCacheService.put(normalized.normalizedUrl(), existing);
+            }
+            return existing;
+        }
+        log.debug("DB cache miss for {}", maskUrl(normalized.normalizedUrl()));
 
         UrlScanResponse cached = urlScanCacheService.get(normalized.normalizedUrl());
         if (isCacheableResult(cached)) {
             log.debug("Cache hit for {}", maskUrl(normalized.normalizedUrl()));
+            System.out.println("Returning scan result from memory cache for URL: " + normalized.normalizedUrl());
             return cached;
         } else if (cached != null) {
             log.debug("Ignoring non-cacheable cached result for {} with status={}", maskUrl(normalized.normalizedUrl()), cached.getStatus());
@@ -140,6 +157,8 @@ public class UrlScannerService {
         String finalUrl = chain.get(chain.size() - 1);
         log.debug("Pipeline step2 resolve complete: chainSize={}, finalUrl={}", chain.size(), maskUrl(finalUrl));
         log.info("Scan resolved final URL: input={}, final={}", maskUrl(normalized.normalizedUrl()), maskUrl(finalUrl));
+        log.info("Scan resolve strategy: input={} strategy={}", maskUrl(normalized.normalizedUrl()), internalInput ? "INTERNAL_DB" : "EXTERNAL_HTTP");
+        System.out.println("Resolved URL TYPE=" + (internalInput ? "internal" : "external") + " FINAL=" + finalUrl);
 
         // STEP 5: urlscan can run in parallel while GSB/VT execute.
         CompletableFuture<UrlscanBehavior> urlscanFuture = CompletableFuture.supplyAsync(
@@ -165,6 +184,13 @@ public class UrlScannerService {
         String verdict = determineVerdict(finalScore, state);
 
         UrlScanResponse response = buildResponse(normalized.normalizedUrl(), finalUrl, chain, behavior, state, finalScore, verdict);
+
+        try {
+            urlScanResultService.saveScanResult(response);
+        } catch (Exception ex) {
+            log.error("Continuing despite DB persistence failure for {}", maskUrl(normalized.normalizedUrl()), ex);
+        }
+
         if (isCacheableResult(response)) {
             urlScanCacheService.put(normalized.normalizedUrl(), response);
         }

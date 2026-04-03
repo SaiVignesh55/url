@@ -10,6 +10,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -28,6 +29,7 @@ class UrlScannerServiceTest {
     private UrlScannerService service;
     private UrlResolverService resolverService;
     private UrlScanCacheService cacheService;
+    private UrlScanResultService scanResultService;
     private UrlNormalizationService normalizationService;
     private SsrfProtectionService ssrfProtectionService;
 
@@ -35,6 +37,7 @@ class UrlScannerServiceTest {
     void setUp() {
         resolverService = mock(UrlResolverService.class);
         cacheService = new UrlScanCacheService();
+        scanResultService = mock(UrlScanResultService.class);
         normalizationService = new UrlNormalizationService();
         ssrfProtectionService = new SsrfProtectionService();
         HttpRetryService retryService = new HttpRetryService();
@@ -50,6 +53,7 @@ class UrlScannerServiceTest {
                 restTemplate,
                 resolverService,
                 cacheService,
+                scanResultService,
                 normalizationService,
                 ssrfProtectionService,
                 retryService
@@ -81,6 +85,7 @@ class UrlScannerServiceTest {
             }
             return new UrlResolverService.ResolvedResult(value, List.of(value), false, false);
         });
+        when(scanResultService.findByScannedUrl(any())).thenReturn(Optional.empty());
     }
 
     @Test
@@ -129,7 +134,7 @@ class UrlScannerServiceTest {
         UrlScanResponse response = service.scanUrl(internal);
 
         assertNotNull(response);
-        assertEquals(resolved, response.getFinalResolvedUrl());
+        assertEquals(resolved, response.getFinalUrl());
         verify(resolverService).resolveUrl(internal);
     }
 

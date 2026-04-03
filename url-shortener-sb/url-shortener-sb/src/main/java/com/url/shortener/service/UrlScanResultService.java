@@ -10,6 +10,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -18,11 +23,45 @@ public class UrlScanResultService {
 
     private final UrlScanResultRepository urlScanResultRepository;
 
+    @Transactional(readOnly = true)
+    public Optional<UrlScanResponse> findByScannedUrl(String scannedUrl) {
+        if (scannedUrl == null || scannedUrl.isBlank()) {
+            return Optional.empty();
+        }
+
+        System.out.println("Fetching scan result from DB for URL: " + scannedUrl);
+        try {
+            Optional<UrlScanResult> existing = urlScanResultRepository.findTopByScannedUrlOrderByCreatedAtDesc(scannedUrl);
+            if (existing.isEmpty()) {
+                return Optional.empty();
+            }
+
+            UrlScanResult row = existing.get();
+            if (!isCacheableStatus(row.getStatus())) {
+                return Optional.empty();
+            }
+
+            return Optional.of(toResponse(row));
+        } catch (Exception ex) {
+            log.error("Failed to fetch scan result from database for scannedUrl={}", scannedUrl, ex);
+            return Optional.empty();
+        }
+    }
+
     @Transactional
-    public void saveScanResult(UrlScanResponse response) {
+    public UrlScanResult saveScanResult(UrlScanResponse response) {
         UrlScanResult scanResult = new UrlScanResult();
-        scanResult.setUrl(normalizeUrl(response.getScannedUrl(), response.getFinalUrl()));
-        scanResult.setFinalVerdict(normalizeVerdict(response.getVerdict(), response.getStatus()));
+        String scannedUrl = normalizeUrl(response.getScannedUrl(), response.getFinalUrl());
+        String verdict = normalizeVerdict(response.getVerdict(), response.getStatus());
+        String status = response.getStatus() == null || response.getStatus().isBlank() ? verdict : response.getStatus();
+
+        scanResult.setUrl(normalizeUrl(response.getFinalUrl(), scannedUrl));
+        scanResult.setScannedUrl(scannedUrl);
+        scanResult.setStatus(status);
+        scanResult.setMessage(response.getMessage());
+        scanResult.setReasons(serializeReasons(response.getReasons()));
+        scanResult.setRiskScore(response.getFinalScore());
+        scanResult.setFinalVerdict(verdict);
         scanResult.setScore(response.getFinalScore());
         scanResult.setMalwareScore(response.getMalwareScore());
         scanResult.setPhishingScore(response.getPhishingScore());
@@ -32,11 +71,107 @@ public class UrlScanResultService {
         scanResult.setCreatedAt(LocalDateTime.now(ZoneOffset.UTC));
 
         try {
-            urlScanResultRepository.save(scanResult);
+            System.out.println("Saving scan result: " + scanResult);
+            UrlScanResult saved = urlScanResultRepository.save(scanResult);
+            System.out.println("Saved scan result with id: " + saved.getId());
+            return saved;
         } catch (Exception ex) {
+            System.out.println("DB save failed for URL: " + scannedUrl + " error=" + ex.getMessage());
             log.error("Failed to save url scan result for url={} verdict={}", scanResult.getUrl(), scanResult.getFinalVerdict(), ex);
             throw ex;
         }
+    }
+
+    private UrlScanResponse toResponse(UrlScanResult row) {
+        Map<String, Integer> breakdown = new LinkedHashMap<>();
+        breakdown.put("malware", safeInt(row.getMalwareScore()));
+        breakdown.put("phishing", safeInt(row.getPhishingScore()));
+        breakdown.put("spam", safeInt(row.getSpamScore()));
+        breakdown.put("piracy", 0);
+        breakdown.put("redirect", safeInt(row.getRedirectRisk()));
+        breakdown.put("domain", safeInt(row.getDomainRisk()));
+
+        UrlScanResponse response = new UrlScanResponse(
+                normalizeVerdict(row.getFinalVerdict(), row.getStatus()),
+                row.getMessage() == null ? "Result returned from DB cache" : row.getMessage(),
+                row.getScannedUrl(),
+                safeInt(row.getScore()),
+                breakdown,
+                buildCategoryLabels(breakdown),
+                new ArrayList<>(List.of("Database cache")),
+                parseReasons(row.getReasons()),
+                new ArrayList<>(List.of(row.getScannedUrl())),
+                row.getUrl(),
+                new ArrayList<>(),
+                0,
+                "",
+                ""
+        );
+
+        response.setVerdict(normalizeVerdict(row.getFinalVerdict(), row.getStatus()));
+        response.setStatus(row.getStatus());
+        response.setMalwareScore(safeInt(row.getMalwareScore()));
+        response.setPhishingScore(safeInt(row.getPhishingScore()));
+        response.setSpamScore(safeInt(row.getSpamScore()));
+        response.setRedirectScore(safeInt(row.getRedirectRisk()));
+        response.setDomainScore(safeInt(row.getDomainRisk()));
+        response.setFinalScore(safeInt(row.getScore()));
+        return response;
+    }
+
+    private Map<String, String> buildCategoryLabels(Map<String, Integer> breakdown) {
+        Map<String, String> labels = new LinkedHashMap<>();
+        for (Map.Entry<String, Integer> entry : breakdown.entrySet()) {
+            labels.put(entry.getKey(), level(entry.getValue()));
+        }
+        return labels;
+    }
+
+    private String level(int score) {
+        if (score > 70) {
+            return "HIGH";
+        }
+        if (score >= 30) {
+            return "MEDIUM";
+        }
+        return "LOW";
+    }
+
+    private List<String> parseReasons(String reasons) {
+        if (reasons == null || reasons.isBlank()) {
+            return new ArrayList<>();
+        }
+        List<String> values = new ArrayList<>();
+        for (String token : reasons.split("\\|")) {
+            String cleaned = token.trim();
+            if (!cleaned.isBlank()) {
+                values.add(cleaned);
+            }
+        }
+        return values;
+    }
+
+    private String serializeReasons(List<String> reasons) {
+        if (reasons == null || reasons.isEmpty()) {
+            return null;
+        }
+        List<String> clean = reasons.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(String::trim)
+                .toList();
+        return clean.isEmpty() ? null : String.join(" | ", clean);
+    }
+
+    private boolean isCacheableStatus(String status) {
+        if (status == null) {
+            return false;
+        }
+        String value = status.toUpperCase();
+        return "SAFE".equals(value) || "SUSPICIOUS".equals(value) || "MALICIOUS".equals(value);
+    }
+
+    private int safeInt(Integer value) {
+        return value == null ? 0 : value;
     }
 
     private String normalizeUrl(String scannedUrl, String finalUrl) {
