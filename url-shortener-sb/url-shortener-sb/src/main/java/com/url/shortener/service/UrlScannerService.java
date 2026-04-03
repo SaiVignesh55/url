@@ -121,6 +121,8 @@ public class UrlScannerService {
         // STEP 1: normalize URL
         UrlNormalizationService.NormalizedUrl normalized = urlNormalizationService.normalizeAndValidate(url);
         log.debug("Pipeline step1 normalize complete: {}", maskUrl(normalized.normalizedUrl()));
+        boolean internalInput = urlResolverService.isInternalShortUrl(normalized.normalizedUrl());
+        log.info("Scan input classification: url={}, type={}", maskUrl(normalized.normalizedUrl()), internalInput ? "internal" : "external");
 
         UrlScanResponse cached = urlScanCacheService.get(normalized.normalizedUrl());
         if (isCacheableResult(cached)) {
@@ -137,6 +139,7 @@ public class UrlScannerService {
                 : resolved.chain();
         String finalUrl = chain.get(chain.size() - 1);
         log.debug("Pipeline step2 resolve complete: chainSize={}, finalUrl={}", chain.size(), maskUrl(finalUrl));
+        log.info("Scan resolved final URL: input={}, final={}", maskUrl(normalized.normalizedUrl()), maskUrl(finalUrl));
 
         // STEP 5: urlscan can run in parallel while GSB/VT execute.
         CompletableFuture<UrlscanBehavior> urlscanFuture = CompletableFuture.supplyAsync(
@@ -200,6 +203,12 @@ public class UrlScannerService {
 
         for (String hop : chain) {
             UrlNormalizationService.NormalizedUrl normalizedHop = urlNormalizationService.normalizeAndValidate(hop);
+            if (urlResolverService.isInternalShortUrl(normalizedHop.normalizedUrl())) {
+                state.checksPerformed.add("Internal short URL resolved from database");
+                log.debug("Skipping SSRF/API checks for internal hop {}", maskUrl(normalizedHop.normalizedUrl()));
+                continue;
+            }
+
             URI hopUri = normalizedHop.uri();
             ssrfProtectionService.assertPublicDestination(hopUri);
 

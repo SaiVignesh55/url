@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class UrlScannerServiceTest {
@@ -51,9 +52,10 @@ class UrlScannerServiceTest {
                 cacheService,
                 normalizationService,
                 ssrfProtectionService,
-                retryService,
-                executor
+                retryService
         );
+
+        ReflectionTestUtils.setField(service, "scanTaskExecutor", executor);
 
         ReflectionTestUtils.setField(cacheService, "cacheEnabled", true);
         ReflectionTestUtils.setField(cacheService, "ttlSeconds", 60L);
@@ -66,6 +68,8 @@ class UrlScannerServiceTest {
         ReflectionTestUtils.setField(service, "safeBrowsingUrl", "https://example.com/gsb");
         ReflectionTestUtils.setField(service, "virusTotalUrl", "https://example.com/vt");
         ReflectionTestUtils.setField(service, "virusTotalAnalysisUrl", "https://example.com/vt/%s");
+        ReflectionTestUtils.setField(service, "suspiciousTldsCsv", "xyz,tk,top");
+        ReflectionTestUtils.setField(service, "piracyKeywordsCsv", "torrent,movierulz,123movies");
         ReflectionTestUtils.setField(service, "asyncTimeoutMs", 5000L);
         ReflectionTestUtils.setField(service, "maxAsyncJobs", 50);
         ReflectionTestUtils.setField(service, "asyncJobRetentionSeconds", 60L);
@@ -105,6 +109,28 @@ class UrlScannerServiceTest {
         UrlScanResponse response = service.scanUrl("https://www.wikipedia.org");
 
         assertTrue(response.getRedirectChain().size() >= 2);
+    }
+
+    @Test
+    void shouldBypassInternalHopAndScanResolvedTarget() {
+        String internal = "https://localhost:9000/r/abc123";
+        String resolved = "https://example.com/landing";
+
+        when(resolverService.resolveUrl(internal))
+                .thenReturn(new UrlResolverService.ResolvedResult(
+                        resolved,
+                        List.of(internal, resolved),
+                        false,
+                        false
+                ));
+        when(resolverService.isInternalShortUrl(internal)).thenReturn(true);
+        when(resolverService.isInternalShortUrl(resolved)).thenReturn(false);
+
+        UrlScanResponse response = service.scanUrl(internal);
+
+        assertNotNull(response);
+        assertEquals(resolved, response.getFinalResolvedUrl());
+        verify(resolverService).resolveUrl(internal);
     }
 
     @Test
