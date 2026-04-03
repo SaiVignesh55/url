@@ -29,11 +29,18 @@ export const useFetchMyShortUrls = (token, onError) => {
 };
 
 export const useFetchTotalClicks = (token, onError) => {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(endDate.getDate() - 29);
+
+    const start = startDate.toISOString().slice(0, 10);
+    const end = endDate.toISOString().slice(0, 10);
+
     return useQuery({
-        queryKey: ["url-totalclick"],
+        queryKey: ["url-totalclick", start, end],
         queryFn: async () => {
             return await api.get(
-                "/api/urls/totalClicks?startDate=2024-01-01&endDate=2025-12-31",
+                `/api/urls/totalClicks?startDate=${start}&endDate=${end}`,
                 {
                     headers: {
                         "Content-Type": "application/json",
@@ -44,26 +51,15 @@ export const useFetchTotalClicks = (token, onError) => {
             );
         },
         select: (data) => {
-            // data.data =>
-                //  {
-                //     "2024-01-01": 120,
-                //     "2024-01-02": 95,
-                //     "2024-01-03": 110,
-                //   };
-                  
-            const convertToArray = Object.keys(data.data).map((key) => ({
-                clickDate: key,
-                count: data.data[key], // data.data[2024-01-01]
-            }));
-            // Object.keys(data.data) => ["2024-01-01", "2024-01-02", "2024-01-03"]
+            // Backward compatibility: if backend still returns a date-keyed map, normalize it.
+            if (data?.data && !Array.isArray(data.data) && !data.data.clicksByDate) {
+                return Object.keys(data.data).map((key) => ({
+                    clickDate: key,
+                    count: data.data[key],
+                }));
+            }
 
-            // FINAL:
-            //   [
-            //     { clickDate: "2024-01-01", count: 120 },
-            //     { clickDate: "2024-01-02", count: 95 },
-            //     { clickDate: "2024-01-03", count: 110 },
-            //   ]
-            return convertToArray;
+            return data?.data?.clicksByDate ?? [];
         },
         onError,
         staleTime: 5000,

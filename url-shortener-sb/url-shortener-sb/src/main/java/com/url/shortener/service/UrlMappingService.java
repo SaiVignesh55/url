@@ -1,6 +1,9 @@
 package com.url.shortener.service;
 
+import com.url.shortener.dtos.AnalyticsResponseDTO;
+import com.url.shortener.dtos.AnalyticsPointDTO;
 import com.url.shortener.dtos.ClickEventDTO;
+import com.url.shortener.dtos.UrlAnalyticsResponseDTO;
 import com.url.shortener.dtos.UrlMappingDTO;
 import com.url.shortener.models.ClickEvent;
 import com.url.shortener.models.UrlMapping;
@@ -8,21 +11,24 @@ import com.url.shortener.models.User;
 import com.url.shortener.repository.ClickEventRepository;
 import com.url.shortener.repository.UrlMappingRepository;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Random;
-import java.util.stream.Collectors;
 
 @Service
+@Slf4j
 @AllArgsConstructor
-public class  UrlMappingService {
+public class UrlMappingService {
 
-    private UrlMappingRepository urlMappingRepository;
-    private ClickEventRepository clickEventRepository;
+    private final UrlMappingRepository urlMappingRepository;
+    private final ClickEventRepository clickEventRepository;
 
     public UrlMappingDTO createShortUrl(String originalUrl, User user) {
         String shortUrl = generateShortUrl();
@@ -35,7 +41,7 @@ public class  UrlMappingService {
         return convertToDto(savedUrlMapping);
     }
 
-    private UrlMappingDTO convertToDto(UrlMapping urlMapping){
+    private UrlMappingDTO convertToDto(UrlMapping urlMapping) {
         UrlMappingDTO urlMappingDTO = new UrlMappingDTO();
         urlMappingDTO.setId(urlMapping.getId());
         urlMappingDTO.setOriginalUrl(urlMapping.getOriginalUrl());
@@ -48,13 +54,13 @@ public class  UrlMappingService {
 
     private String generateShortUrl() {
         String characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-
         Random random = new Random();
         StringBuilder shortUrl = new StringBuilder(8);
 
         for (int i = 0; i < 8; i++) {
             shortUrl.append(characters.charAt(random.nextInt(characters.length())));
         }
+
         return shortUrl.toString();
     }
 
@@ -64,44 +70,129 @@ public class  UrlMappingService {
                 .toList();
     }
 
-    public List<ClickEventDTO> getClickEventsByDate(String shortUrl, LocalDateTime start, LocalDateTime end) {
+    public List<ClickEventDTO> getClickEventsByDate(String shortUrl, LocalDate startDate, LocalDate endDate) {
         UrlMapping urlMapping = urlMappingRepository.findByShortUrl(shortUrl);
-        if (urlMapping != null) {
-            return clickEventRepository.findByUrlMappingAndClickDateBetween(urlMapping, start, end).stream()
-                    .collect(Collectors.groupingBy(click -> click.getClickDate().toLocalDate(), Collectors.counting()))
-                    .entrySet().stream()
-                    .map(entry -> {
-                        ClickEventDTO clickEventDTO = new ClickEventDTO();
-                        clickEventDTO.setClickDate(entry.getKey());
-                        clickEventDTO.setCount(entry.getValue());
-                        return clickEventDTO;
-                    })
-                    .collect(Collectors.toList());
+        if (urlMapping == null) {
+            return List.of();
         }
-        return null;
+
+        LocalDateTime rangeStart = startDate.atStartOfDay();
+        LocalDateTime rangeEndExclusive = endDate.plusDays(1).atStartOfDay();
+
+        return clickEventRepository.aggregateDailyClicksByUrlMappingId(urlMapping.getId(), rangeStart, rangeEndExclusive)
+                .stream()
+                .map(this::toClickEventDTO)
+                .toList();
     }
 
-    public Map<LocalDate, Long> getTotalClicksByUserAndDate(User user, LocalDate start, LocalDate end) {
-        List<UrlMapping> urlMappings = urlMappingRepository.findByUser(user);
-        List<ClickEvent> clickEvents = clickEventRepository.findByUrlMappingInAndClickDateBetween(urlMappings, start.atStartOfDay(), end.plusDays(1).atStartOfDay());
-        return clickEvents.stream()
-                .collect(Collectors.groupingBy(click -> click.getClickDate().toLocalDate(), Collectors.counting()));
+    public UrlAnalyticsResponseDTO getUrlAnalyticsByShortCode(String shortCode, LocalDate startDate, LocalDate endDate) {
+        try {
+            log.info("Analytics request received shortCode={} startDate={} endDate={}", shortCode, startDate, endDate);
 
+            UrlMapping urlMapping = urlMappingRepository.findByShortUrl(shortCode);
+            log.info("Analytics URL lookup result shortCode={} found={}", shortCode, urlMapping != null);
+
+            if (urlMapping == null) {
+                return null;
+            }
+
+            LocalDate resolvedStart = startDate;
+            LocalDate resolvedEnd = endDate;
+            if (resolvedStart.isAfter(resolvedEnd)) {
+                LocalDate temp = resolvedStart;
+                resolvedStart = resolvedEnd;
+                resolvedEnd = temp;
+                log.warn("Analytics date range swapped for shortCode={} startDate={} endDate={}", shortCode, resolvedStart, resolvedEnd);
+            }
+
+            LocalDateTime rangeStart = resolvedStart.atStartOfDay();
+            LocalDateTime rangeEndExclusive = resolvedEnd.plusDays(1).atStartOfDay();
+
+            List<ClickEventRepository.DailyClickCountProjection> projections =
+                    clickEventRepository.aggregateDailyClicksByUrlMappingId(urlMapping.getId(), rangeStart, rangeEndExclusive);
+
+            List<AnalyticsPointDTO> clicksOverTime = new ArrayList<>();
+            long totalClicks = 0L;
+            for (ClickEventRepository.DailyClickCountProjection projection : projections) {
+                AnalyticsPointDTO point = new AnalyticsPointDTO();
+                point.setDate(projection.getClickDate().toString());
+                point.setCount(projection.getCount());
+                clicksOverTime.add(point);
+                totalClicks += projection.getCount();
+            }
+
+            log.info("Analytics click records fetched shortCode={} records={}", shortCode, clicksOverTime.size());
+
+            UrlAnalyticsResponseDTO response = new UrlAnalyticsResponseDTO();
+            response.setShortCode(urlMapping.getShortUrl());
+            response.setOriginalUrl(urlMapping.getOriginalUrl());
+            response.setTotalClicks(totalClicks);
+            response.setClicksOverTime(clicksOverTime);
+            return response;
+        } catch (Exception ex) {
+            log.error("Analytics processing failed for shortCode={}", shortCode, ex);
+            throw new RuntimeException("Analytics processing failed", ex);
+        }
     }
 
-    public UrlMapping getOriginalUrl(String shortUrl) {
-        UrlMapping urlMapping = urlMappingRepository.findByShortUrl(shortUrl);
-        if (urlMapping != null) {
-            urlMapping.setClickCount(urlMapping.getClickCount() + 1);
-            urlMappingRepository.save(urlMapping);
+    public AnalyticsResponseDTO getTotalClicksByUserAndDate(User user, LocalDate start, LocalDate end) {
+        LocalDateTime rangeStart = start.atStartOfDay();
+        LocalDateTime rangeEndExclusive = end.plusDays(1).atStartOfDay();
 
-            // Record Click Event
-            ClickEvent clickEvent = new ClickEvent();
-            clickEvent.setClickDate(LocalDateTime.now());
-            clickEvent.setUrlMapping(urlMapping);
-            clickEventRepository.save(clickEvent);
+        List<ClickEventDTO> clicksByDate = clickEventRepository.aggregateDailyClicksByUser(user, rangeStart, rangeEndExclusive)
+                .stream()
+                .map(this::toClickEventDTO)
+                .toList();
+
+        long totalClicks = clickEventRepository.countByUrlMappingUserAndClickDateGreaterThanEqualAndClickDateLessThan(
+                user,
+                rangeStart,
+                rangeEndExclusive
+        );
+
+        AnalyticsResponseDTO response = new AnalyticsResponseDTO();
+        response.setTotalClicks(totalClicks);
+        response.setClicksByDate(clicksByDate);
+        return response;
+    }
+
+    @Transactional
+    public UrlMapping getOriginalUrl(String shortUrl, String ipAddress, String userAgent) {
+        UrlMapping urlMapping = urlMappingRepository.findByShortUrl(shortUrl);
+        if (urlMapping == null) {
+            return null;
         }
+
+        urlMapping.setClickCount(urlMapping.getClickCount() + 1);
+        urlMappingRepository.save(urlMapping);
+
+        ClickEvent clickEvent = new ClickEvent();
+        clickEvent.setClickDate(LocalDateTime.now(ZoneOffset.UTC));
+        clickEvent.setUrlMapping(urlMapping);
+        clickEvent.setIpAddress(trimValue(ipAddress, 64));
+        clickEvent.setUserAgent(trimValue(userAgent, 1024));
+        clickEventRepository.save(clickEvent);
+
+        log.info("Saved click event for shortUrl={} urlMappingId={} timestamp={} ip={}",
+                shortUrl,
+                urlMapping.getId(),
+                clickEvent.getClickDate(),
+                clickEvent.getIpAddress());
 
         return urlMapping;
+    }
+
+    private ClickEventDTO toClickEventDTO(ClickEventRepository.DailyClickCountProjection projection) {
+        ClickEventDTO clickEventDTO = new ClickEventDTO();
+        clickEventDTO.setClickDate(projection.getClickDate());
+        clickEventDTO.setCount(projection.getCount());
+        return clickEventDTO;
+    }
+
+    private String trimValue(String value, int maxLength) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.length() <= maxLength ? value : value.substring(0, maxLength);
     }
 }

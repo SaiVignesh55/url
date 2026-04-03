@@ -36,20 +36,25 @@ const ShortenItem = ({ originalUrl, shortUrl, clickCount, createdDate }) => {
     const fetchMyShortUrl = useCallback(async () => {
         setLoader(true);
         try {
-             const { data } = await api.get(`/api/urls/analytics/${selectedUrl}?startDate=2024-12-01T00:00:00&endDate=2025-12-31T23:59:59`, {
+            const endDate = new Date();
+            const startDate = new Date();
+            startDate.setDate(endDate.getDate() - 29);
+
+            const start = startDate.toISOString().slice(0, 10);
+            const end = endDate.toISOString().slice(0, 10);
+
+             const { data } = await api.get(`/api/urls/analytics/${selectedUrl}?startDate=${start}&endDate=${end}`, {
                         headers: {
                           "Content-Type": "application/json",
                           Accept: "application/json",
                           Authorization: "Bearer " + token,
                         },
                       });
-            setAnalyticsData(data);
+            setAnalyticsData(data?.clicksOverTime ?? []);
             setSelectedUrl("");
-            console.log(data);
             
         } catch (error) {
             navigate("/error");
-            console.log(error);
         } finally {
             setLoader(false);
         }
