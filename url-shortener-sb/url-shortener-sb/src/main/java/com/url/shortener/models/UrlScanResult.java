@@ -64,6 +64,18 @@ public class UrlScanResult {
     @Column(name = "domain_risk", nullable = false)
     private Integer domainRisk;
 
+    @Column(name = "urlscan_scan_id", nullable = false, length = 128)
+    private String urlscanScanId;
+
+    @Column(name = "screenshot_url", nullable = false, length = 2048)
+    private String screenshotUrl;
+
+    @Column(name = "redirect_chain", columnDefinition = "TEXT")
+    private String redirectChain;
+
+    @Column(name = "final_url", nullable = false, length = 2048)
+    private String finalUrl;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 }

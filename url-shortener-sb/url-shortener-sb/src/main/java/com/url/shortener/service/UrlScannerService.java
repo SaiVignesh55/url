@@ -38,7 +38,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import static org.springframework.http.HttpStatus.NOT_FOUND;
@@ -132,7 +131,7 @@ public class UrlScannerService {
         if (existingFromDb.isPresent()) {
             UrlScanResponse existing = existingFromDb.get();
             log.info("DB cache hit for {} with status={}", maskUrl(normalized.normalizedUrl()), existing.getStatus());
-            System.out.println("Returning scan result from DB cache for URL: " + normalized.normalizedUrl());
+            log.info("RETURNING TO FRONTEND (DB cache): status={}, scannedUrl={}", existing.getStatus(), maskUrl(normalized.normalizedUrl()));
             if (isCacheableResult(existing)) {
                 urlScanCacheService.put(normalized.normalizedUrl(), existing);
             }
@@ -143,7 +142,7 @@ public class UrlScannerService {
         UrlScanResponse cached = urlScanCacheService.get(normalized.normalizedUrl());
         if (isCacheableResult(cached)) {
             log.debug("Cache hit for {}", maskUrl(normalized.normalizedUrl()));
-            System.out.println("Returning scan result from memory cache for URL: " + normalized.normalizedUrl());
+            log.info("RETURNING TO FRONTEND (memory cache): status={}, scannedUrl={}", cached.getStatus(), maskUrl(normalized.normalizedUrl()));
             return cached;
         } else if (cached != null) {
             log.debug("Ignoring non-cacheable cached result for {} with status={}", maskUrl(normalized.normalizedUrl()), cached.getStatus());
@@ -171,11 +170,9 @@ public class UrlScannerService {
 
         UrlscanBehavior behavior;
         try {
-            behavior = urlscanFuture.get(Math.max(1000, urlscanWaitMs), TimeUnit.MILLISECONDS);
-        } catch (TimeoutException ex) {
-            log.debug("urlscan did not complete within wait window for {}. Continuing with core signals.", maskUrl(finalUrl));
-            behavior = UrlscanBehavior.timeoutFailure(finalUrl);
-        } catch (Exception ex) {
+            // Do not return early; wait until urlscan returns data or its own poll timeout.
+            behavior = urlscanFuture.join();
+        } catch (CompletionException ex) {
             behavior = UrlscanBehavior.externalFailure(finalUrl);
         }
         applyUrlscanSignals(state, behavior);
@@ -198,6 +195,8 @@ public class UrlScannerService {
         log.info("Scan completed: url={}, verdict={}, score={}", maskUrl(normalized.normalizedUrl()), verdict, finalScore);
         log.debug("Category scores malware={}, phishing={}, spam={}, piracy={}, redirect={}, domain={}",
                 state.malwareScore, state.phishingScore, state.spamScore, state.piracyScore, state.redirectScore, state.domainScore);
+        log.info("RETURNING TO FRONTEND: status={}, finalUrl={}, screenshotUrl={}",
+                response.getStatus(), maskUrl(response.getFinalUrl()), response.getScreenshotUrl());
         return response;
     }
 
@@ -453,7 +452,7 @@ public class UrlScannerService {
                 dedupe(state.checksPerformed),
                 dedupe(state.reasons),
                 chain,
-                finalUrl,
+                behavior != null && behavior.finalUrl != null && !behavior.finalUrl.isBlank() ? behavior.finalUrl : finalUrl,
                 behavior == null ? List.of() : behavior.contactedDomains,
                 behavior == null ? 0 : behavior.scriptCount,
                 behavior == null ? "" : behavior.pageTitle,
@@ -468,6 +467,7 @@ public class UrlScannerService {
         response.setRedirectScore(state.redirectScore);
         response.setDomainScore(state.domainScore);
         response.setTotalRequests(behavior == null ? 0 : behavior.totalRequests);
+        response.setUrlscanScanId(behavior == null ? "" : behavior.urlscanScanId);
         return response;
     }
 
@@ -721,7 +721,14 @@ public class UrlScannerService {
             if (uuid == null || uuid.isBlank()) {
                 return UrlscanBehavior.externalFailure(safeUrl);
             }
-            return pollUrlscanResult(uuid, safeUrl);
+            UrlscanBehavior behavior = pollUrlscanResult(uuid, safeUrl);
+            behavior.urlscanScanId = uuid;
+            String screenshotUrl = "https://urlscan.io/screenshots/" + uuid + ".png";
+            log.info("SCREENSHOT URL: {}", screenshotUrl);
+            if (behavior.screenshotUrl == null || behavior.screenshotUrl.isBlank()) {
+                behavior.screenshotUrl = screenshotUrl;
+            }
+            return behavior;
         } catch (Exception ex) {
             log.warn("urlscan unavailable for {}", maskUrl(safeUrl));
             return UrlscanBehavior.externalFailure(safeUrl);
@@ -745,7 +752,9 @@ public class UrlScannerService {
             return null;
         }
         JsonNode root = objectMapper.readTree(response.getBody());
-        return root.path("uuid").asText(null);
+        String uuid = root.path("uuid").asText(null);
+        log.info("URLSCAN UUID: {}", uuid);
+        return uuid;
     }
 
     private UrlscanBehavior pollUrlscanResult(String uuid, String fallbackUrl) {
@@ -761,7 +770,9 @@ public class UrlScannerService {
 
                 if (response.getBody() != null && !response.getBody().isBlank()) {
                     JsonNode root = objectMapper.readTree(response.getBody());
-                    return parseUrlscanResult(root, fallbackUrl);
+                    if (isUrlscanResultReady(root)) {
+                        return parseUrlscanResult(root, fallbackUrl, uuid);
+                    }
                 }
             } catch (HttpClientErrorException.NotFound ex) {
                 // Still processing.
@@ -773,8 +784,15 @@ public class UrlScannerService {
         return UrlscanBehavior.timeoutFailure(fallbackUrl);
     }
 
-    private UrlscanBehavior parseUrlscanResult(JsonNode root, String fallbackUrl) {
+    private boolean isUrlscanResultReady(JsonNode root) {
+        String pageUrl = root.path("page").path("url").asText("");
+        String taskUrl = root.path("task").path("url").asText("");
+        return (!pageUrl.isBlank()) || (!taskUrl.isBlank());
+    }
+
+    private UrlscanBehavior parseUrlscanResult(JsonNode root, String fallbackUrl, String uuid) {
         UrlscanBehavior behavior = UrlscanBehavior.empty(fallbackUrl);
+        behavior.urlscanScanId = uuid == null ? "" : uuid;
 
         behavior.finalUrl = root.path("page").path("url").asText(fallbackUrl);
 
@@ -799,6 +817,9 @@ public class UrlScannerService {
         }
         if (screenshot.isBlank()) {
             screenshot = root.path("page").path("screenshot").asText("");
+        }
+        if (screenshot.isBlank() && uuid != null && !uuid.isBlank()) {
+            screenshot = "https://urlscan.io/screenshots/" + uuid + ".png";
         }
         behavior.screenshotUrl = screenshot;
         behavior.scanStatus = "COMPLETED";
@@ -1049,6 +1070,7 @@ public class UrlScannerService {
     }
 
     private static class UrlscanBehavior {
+        private String urlscanScanId;
         private String finalUrl;
         private List<String> contactedDomains;
         private int scriptCount;
@@ -1060,6 +1082,7 @@ public class UrlScannerService {
 
         private static UrlscanBehavior empty(String url) {
             UrlscanBehavior behavior = new UrlscanBehavior();
+            behavior.urlscanScanId = "";
             behavior.finalUrl = url;
             behavior.contactedDomains = new ArrayList<>();
             behavior.scriptCount = 0;

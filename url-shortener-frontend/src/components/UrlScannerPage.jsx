@@ -101,6 +101,7 @@ const UrlScannerPage = () => {
   const checksPerformed = Array.isArray(result?.checksPerformed) ? result.checksPerformed : [];
   const redirectChain = Array.isArray(result?.redirectChain) ? result.redirectChain : [];
   const finalUrl = result?.finalUrl || "";
+  const screenshotPending = Boolean(result?.urlscanScanId && !parsedScreenshotUrl);
   const contactedDomains = (() => {
     if (Array.isArray(result?.domains) && result.domains.length > 0) {
       return result.domains;
@@ -470,7 +471,7 @@ const UrlScannerPage = () => {
               copiedFinal={copiedFinal}
             />
 
-            <ScreenshotPanel screenshotUrl={parsedScreenshotUrl} isProcessing={loading} />
+            <ScreenshotPanel screenshotUrl={parsedScreenshotUrl} isProcessing={loading || screenshotPending} />
 
             <ReasonsList reasons={visibleReasons} />
           </Motion.div>

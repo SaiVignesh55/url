@@ -29,7 +29,7 @@ public class UrlScanResultService {
             return Optional.empty();
         }
 
-        System.out.println("Fetching scan result from DB for URL: " + scannedUrl);
+        log.debug("Fetching scan result from DB for scannedUrl={}", scannedUrl);
         try {
             Optional<UrlScanResult> existing = urlScanResultRepository.findTopByScannedUrlOrderByCreatedAtDesc(scannedUrl);
             if (existing.isEmpty()) {
@@ -68,15 +68,19 @@ public class UrlScanResultService {
         scanResult.setSpamScore(response.getSpamScore());
         scanResult.setRedirectRisk(response.getRedirectScore());
         scanResult.setDomainRisk(response.getDomainScore());
+        scanResult.setUrlscanScanId(emptyIfNull(response.getUrlscanScanId()));
+        scanResult.setScreenshotUrl(normalizeUrl(response.getScreenshotUrl(), ""));
+        scanResult.setRedirectChain(serializeRedirectChain(response.getRedirectChain()));
+        scanResult.setFinalUrl(normalizeUrl(response.getFinalUrl(), scannedUrl));
         scanResult.setCreatedAt(LocalDateTime.now(ZoneOffset.UTC));
 
         try {
-            System.out.println("Saving scan result: " + scanResult);
+            log.info("Saving scan result for scannedUrl={} status={}", scannedUrl, status);
             UrlScanResult saved = urlScanResultRepository.save(scanResult);
-            System.out.println("Saved scan result with id: " + saved.getId());
+            log.info("Saved scan result with id={}", saved.getId());
             return saved;
         } catch (Exception ex) {
-            System.out.println("DB save failed for URL: " + scannedUrl + " error=" + ex.getMessage());
+            log.error("DB save failed for scannedUrl={} error={}", scannedUrl, ex.getMessage());
             log.error("Failed to save url scan result for url={} verdict={}", scanResult.getUrl(), scanResult.getFinalVerdict(), ex);
             throw ex;
         }
@@ -100,12 +104,12 @@ public class UrlScanResultService {
                 buildCategoryLabels(breakdown),
                 new ArrayList<>(List.of("Database cache")),
                 parseReasons(row.getReasons()),
-                new ArrayList<>(List.of(row.getScannedUrl())),
-                row.getUrl(),
+                parseRedirectChain(row.getRedirectChain(), row.getScannedUrl()),
+                normalizeUrl(row.getFinalUrl(), row.getUrl()),
                 new ArrayList<>(),
                 0,
                 "",
-                ""
+                emptyIfNull(row.getScreenshotUrl())
         );
 
         response.setVerdict(normalizeVerdict(row.getFinalVerdict(), row.getStatus()));
@@ -116,7 +120,35 @@ public class UrlScanResultService {
         response.setRedirectScore(safeInt(row.getRedirectRisk()));
         response.setDomainScore(safeInt(row.getDomainRisk()));
         response.setFinalScore(safeInt(row.getScore()));
+        response.setScreenshotUrl(emptyIfNull(row.getScreenshotUrl()));
+        response.setUrlscanScanId(emptyIfNull(row.getUrlscanScanId()));
         return response;
+    }
+
+    private List<String> parseRedirectChain(String redirectChain, String fallbackUrl) {
+        String safeFallback = normalizeUrl(fallbackUrl, "unknown");
+        if (redirectChain == null || redirectChain.isBlank()) {
+            return new ArrayList<>(List.of(safeFallback));
+        }
+        List<String> values = new ArrayList<>();
+        for (String token : redirectChain.split("\\n")) {
+            String cleaned = token.trim();
+            if (!cleaned.isBlank()) {
+                values.add(cleaned);
+            }
+        }
+        return values.isEmpty() ? new ArrayList<>(List.of(safeFallback)) : values;
+    }
+
+    private String serializeRedirectChain(List<String> redirectChain) {
+        if (redirectChain == null || redirectChain.isEmpty()) {
+            return null;
+        }
+        List<String> clean = redirectChain.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(String::trim)
+                .toList();
+        return clean.isEmpty() ? null : String.join("\n", clean);
     }
 
     private Map<String, String> buildCategoryLabels(Map<String, Integer> breakdown) {
@@ -192,6 +224,10 @@ public class UrlScanResultService {
             return status;
         }
         return "UNKNOWN";
+    }
+
+    private String emptyIfNull(String value) {
+        return value == null ? "" : value;
     }
 }
 

@@ -37,6 +37,7 @@ public class UrlScanResponse {
     private int totalRequests;
     private String pageTitle;
     private String screenshotUrl;
+    private String urlscanScanId;
 
     // Compatibility constructor used by existing service/controller/tests.
     public UrlScanResponse(
@@ -71,6 +72,7 @@ public class UrlScanResponse {
         this.totalRequests = 0;
         this.pageTitle = pageTitle;
         this.screenshotUrl = screenshotUrl;
+        this.urlscanScanId = "";
 
         this.malwareScore = this.breakdown.getOrDefault("malware", 0);
         this.phishingScore = this.breakdown.getOrDefault("phishing", 0);
@@ -104,6 +106,7 @@ public class UrlScanResponse {
         this.totalRequests = 0;
         this.pageTitle = "";
         this.screenshotUrl = "";
+        this.urlscanScanId = "";
     }
 
     // Compatibility accessor for older usages that still read riskScore.

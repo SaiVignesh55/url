@@ -34,6 +34,10 @@ class UrlScanResultRepositoryTest {
         result.setSpamScore(5);
         result.setRedirectRisk(3);
         result.setDomainRisk(2);
+        result.setUrlscanScanId("scan-uuid-123");
+        result.setScreenshotUrl("https://urlscan.io/screenshots/scan-uuid-123.png");
+        result.setRedirectChain("https://example.com\nhttps://example.com/final");
+        result.setFinalUrl("https://example.com/final");
         result.setCreatedAt(LocalDateTime.now());
 
         UrlScanResult saved = urlScanResultRepository.save(result);
@@ -44,6 +48,8 @@ class UrlScanResultRepositoryTest {
         Optional<UrlScanResult> byScannedUrl = urlScanResultRepository.findByScannedUrl("https://example.com");
         assertTrue(byScannedUrl.isPresent());
         assertEquals("SAFE", byScannedUrl.get().getStatus());
+        assertEquals("scan-uuid-123", byScannedUrl.get().getUrlscanScanId());
+        assertEquals("https://urlscan.io/screenshots/scan-uuid-123.png", byScannedUrl.get().getScreenshotUrl());
     }
 }
 
