@@ -468,6 +468,7 @@ public class UrlScannerService {
         response.setDomainScore(state.domainScore);
         response.setTotalRequests(behavior == null ? 0 : behavior.totalRequests);
         response.setUrlscanScanId(behavior == null ? "" : behavior.urlscanScanId);
+        response.setResultUrl(behavior == null ? "" : behavior.resultUrl);
         return response;
     }
 
@@ -723,11 +724,9 @@ public class UrlScannerService {
             }
             UrlscanBehavior behavior = pollUrlscanResult(uuid, safeUrl);
             behavior.urlscanScanId = uuid;
-            String screenshotUrl = "https://urlscan.io/screenshots/" + uuid + ".png";
-            log.info("SCREENSHOT URL: {}", screenshotUrl);
-            if (behavior.screenshotUrl == null || behavior.screenshotUrl.isBlank()) {
-                behavior.screenshotUrl = screenshotUrl;
-            }
+            behavior.screenshotUrl = buildUrlscanScreenshotUrl(uuid);
+            behavior.resultUrl = buildUrlscanResultUrl(uuid);
+            log.info("SCREENSHOT URL GENERATED: {}", behavior.screenshotUrl);
             return behavior;
         } catch (Exception ex) {
             log.warn("urlscan unavailable for {}", maskUrl(safeUrl));
@@ -793,6 +792,7 @@ public class UrlScannerService {
     private UrlscanBehavior parseUrlscanResult(JsonNode root, String fallbackUrl, String uuid) {
         UrlscanBehavior behavior = UrlscanBehavior.empty(fallbackUrl);
         behavior.urlscanScanId = uuid == null ? "" : uuid;
+        behavior.resultUrl = buildUrlscanResultUrl(uuid);
 
         behavior.finalUrl = root.path("page").path("url").asText(fallbackUrl);
 
@@ -811,19 +811,23 @@ public class UrlScannerService {
         behavior.totalRequests = root.path("stats").path("requests").asInt(0);
         behavior.pageTitle = root.path("page").path("title").asText("");
 
-        String screenshot = root.path("task").path("screenshotURL").asText("");
-        if (screenshot.isBlank()) {
-            screenshot = root.path("task").path("screenshot").asText("");
-        }
-        if (screenshot.isBlank()) {
-            screenshot = root.path("page").path("screenshot").asText("");
-        }
-        if (screenshot.isBlank() && uuid != null && !uuid.isBlank()) {
-            screenshot = "https://urlscan.io/screenshots/" + uuid + ".png";
-        }
-        behavior.screenshotUrl = screenshot;
+        behavior.screenshotUrl = buildUrlscanScreenshotUrl(uuid);
         behavior.scanStatus = "COMPLETED";
         return behavior;
+    }
+
+    private String buildUrlscanScreenshotUrl(String uuid) {
+        if (uuid == null || uuid.isBlank()) {
+            return "";
+        }
+        return "https://urlscan.io/screenshots/" + uuid + ".png";
+    }
+
+    private String buildUrlscanResultUrl(String uuid) {
+        if (uuid == null || uuid.isBlank()) {
+            return "";
+        }
+        return "https://urlscan.io/result/" + uuid + "/";
     }
 
     private Map<String, Object> buildSafeBrowsingPayload(String url) {
@@ -1071,6 +1075,7 @@ public class UrlScannerService {
 
     private static class UrlscanBehavior {
         private String urlscanScanId;
+        private String resultUrl;
         private String finalUrl;
         private List<String> contactedDomains;
         private int scriptCount;
@@ -1083,6 +1088,7 @@ public class UrlScannerService {
         private static UrlscanBehavior empty(String url) {
             UrlscanBehavior behavior = new UrlscanBehavior();
             behavior.urlscanScanId = "";
+            behavior.resultUrl = "";
             behavior.finalUrl = url;
             behavior.contactedDomains = new ArrayList<>();
             behavior.scriptCount = 0;

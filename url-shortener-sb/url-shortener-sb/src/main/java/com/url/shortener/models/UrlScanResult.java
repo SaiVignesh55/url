@@ -6,6 +6,8 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import lombok.Data;
 
@@ -63,6 +65,10 @@ public class UrlScanResult {
 
     @Column(name = "domain_risk", nullable = false)
     private Integer domainRisk;
+
+    @ManyToOne
+    @JoinColumn(name = "user_id")
+    private User user;
 
     @Column(name = "urlscan_scan_id", nullable = false, length = 128)
     private String urlscanScanId;

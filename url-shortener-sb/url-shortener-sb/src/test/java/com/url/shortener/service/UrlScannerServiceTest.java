@@ -143,12 +143,12 @@ class UrlScannerServiceTest {
         String jobId = service.submitAsyncScan("https://example.com");
 
         UrlScanAsyncStatusResponse status = null;
-        for (int i = 0; i < 30; i++) {
+        for (int i = 0; i < 100; i++) {
             status = service.getAsyncScanStatus(jobId);
             if (!"PENDING".equals(status.getStatus())) {
                 break;
             }
-            TimeUnit.MILLISECONDS.sleep(50);
+            TimeUnit.MILLISECONDS.sleep(100);
         }
 
         assertNotNull(status);

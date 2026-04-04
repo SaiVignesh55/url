@@ -1,41 +1,36 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion as Motion } from "framer-motion";
 
-const ScreenshotPanel = ({ screenshotUrl, isProcessing = false }) => {
-  const MAX_RETRIES = 3;
-  const [retryCount, setRetryCount] = useState(0);
-  const [isRetrying, setIsRetrying] = useState(false);
-  const [loadFailed, setLoadFailed] = useState(false);
+const ScreenshotPanel = ({ screenshotUrl, resultUrl, isProcessing = false }) => {
+  const MAX_RETRIES = 5;
+  const [retry, setRetry] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const [isImageLoading, setIsImageLoading] = useState(Boolean(screenshotUrl));
+  const [cacheBuster, setCacheBuster] = useState(() => Date.now());
 
   useEffect(() => {
-    setRetryCount(0);
-    setIsRetrying(false);
-    setLoadFailed(false);
-  }, [screenshotUrl]);
+    if (screenshotUrl && !failed) {
+      console.log(`Loading screenshot attempt ${retry + 1}`);
+    }
+  }, [retry, screenshotUrl, failed]);
 
-  useEffect(() => {
-    if (!isRetrying) return undefined;
+  const imageSrc = screenshotUrl ? `${screenshotUrl}?t=${cacheBuster}` : "";
 
-    const timer = setTimeout(() => {
-      setRetryCount((prev) => prev + 1);
-      setIsRetrying(false);
-    }, 1800);
-
-    return () => clearTimeout(timer);
-  }, [isRetrying]);
-
-  const imageSrc = useMemo(() => {
-    if (!screenshotUrl) return "";
-    const token = `retry=${retryCount}`;
-    return screenshotUrl.includes("?") ? `${screenshotUrl}&${token}` : `${screenshotUrl}?${token}`;
-  }, [screenshotUrl, retryCount]);
+  const openUrl = resultUrl || "#";
 
   const onImageError = () => {
-    if (retryCount < MAX_RETRIES) {
-      setIsRetrying(true);
+    if (retry < MAX_RETRIES) {
+      console.log("Retrying screenshot");
+      setIsImageLoading(true);
+      setTimeout(() => {
+        setRetry((value) => value + 1);
+        setCacheBuster(Date.now());
+      }, 3000);
       return;
     }
-    setLoadFailed(true);
+    console.log("Final failure");
+    setFailed(true);
+    setIsImageLoading(false);
   };
 
   return (
@@ -48,29 +43,25 @@ const ScreenshotPanel = ({ screenshotUrl, isProcessing = false }) => {
     >
       <h3 className="text-base font-semibold text-white">Screenshot Preview</h3>
 
-      {screenshotUrl && !loadFailed ? (
+      {screenshotUrl && !failed ? (
         <>
           <div className="mt-4 rounded-lg border border-white/20 overflow-hidden bg-slate-900/50">
-            {screenshotUrl && (
-              <img
-                src={imageSrc}
-                alt="Website Screenshot"
-                style={{ width: "100%", borderRadius: "10px" }}
-                className="w-full object-cover"
-                loading="lazy"
-                onError={onImageError}
-                onLoad={() => {
-                  setIsRetrying(false);
-                  setLoadFailed(false);
-                }}
-              />
-            )}
+            <img
+              key={retry}
+              src={imageSrc}
+              alt="Screenshot"
+              style={{ width: "100%", borderRadius: "10px" }}
+              className="w-full object-cover"
+              loading="lazy"
+              onError={onImageError}
+              onLoad={() => setIsImageLoading(false)}
+            />
           </div>
 
-          {isRetrying && <p className="mt-3 text-sm text-slate-300">Loading screenshot...</p>}
+          {isImageLoading && <p className="mt-3 text-sm text-slate-300">Loading screenshot...</p>}
 
           <a
-            href={imageSrc}
+            href={openUrl}
             target="_blank"
             rel="noreferrer"
             className="inline-flex mt-3 text-sm font-semibold border border-white/25 rounded-md px-3 py-1.5 text-slate-100 hover:bg-white/10 transition-colors duration-300"
@@ -79,11 +70,44 @@ const ScreenshotPanel = ({ screenshotUrl, isProcessing = false }) => {
           </a>
         </>
       ) : isProcessing ? (
-        <p className="mt-4 text-sm text-slate-300">Screenshot processing in urlscan...</p>
-      ) : screenshotUrl && loadFailed ? (
-        <p className="mt-4 text-sm text-slate-300">Loading screenshot...</p>
+        <>
+          <p className="mt-4 text-sm text-slate-300">Loading screenshot...</p>
+
+          <a
+            href={openUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex mt-3 text-sm font-semibold border border-white/25 rounded-md px-3 py-1.5 text-slate-100 hover:bg-white/10 transition-colors duration-300"
+          >
+            Open Full Screenshot
+          </a>
+        </>
+      ) : failed ? (
+        <>
+          <p className="mt-4 text-sm text-slate-300">Screenshot not available yet</p>
+
+          <a
+            href={openUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex mt-3 text-sm font-semibold border border-white/25 rounded-md px-3 py-1.5 text-slate-100 hover:bg-white/10 transition-colors duration-300"
+          >
+            Open Full Screenshot
+          </a>
+        </>
       ) : (
-        <p className="mt-4 text-sm text-slate-300">No screenshot available for this scan.</p>
+        <>
+          <p className="mt-4 text-sm text-slate-300">Screenshot not available yet</p>
+
+          <a
+            href={openUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex mt-3 text-sm font-semibold border border-white/25 rounded-md px-3 py-1.5 text-slate-100 hover:bg-white/10 transition-colors duration-300"
+          >
+            Open Full Screenshot
+          </a>
+        </>
       )}
     </Motion.section>
   );

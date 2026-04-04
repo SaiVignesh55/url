@@ -68,8 +68,9 @@ public class UrlScanResultService {
         scanResult.setSpamScore(response.getSpamScore());
         scanResult.setRedirectRisk(response.getRedirectScore());
         scanResult.setDomainRisk(response.getDomainScore());
-        scanResult.setUrlscanScanId(emptyIfNull(response.getUrlscanScanId()));
-        scanResult.setScreenshotUrl(normalizeUrl(response.getScreenshotUrl(), ""));
+        String urlscanScanId = emptyIfNull(response.getUrlscanScanId());
+        scanResult.setUrlscanScanId(urlscanScanId);
+        scanResult.setScreenshotUrl(normalizeUrl(response.getScreenshotUrl(), buildUrlscanScreenshotUrl(urlscanScanId)));
         scanResult.setRedirectChain(serializeRedirectChain(response.getRedirectChain()));
         scanResult.setFinalUrl(normalizeUrl(response.getFinalUrl(), scannedUrl));
         scanResult.setCreatedAt(LocalDateTime.now(ZoneOffset.UTC));
@@ -120,9 +121,25 @@ public class UrlScanResultService {
         response.setRedirectScore(safeInt(row.getRedirectRisk()));
         response.setDomainScore(safeInt(row.getDomainRisk()));
         response.setFinalScore(safeInt(row.getScore()));
-        response.setScreenshotUrl(emptyIfNull(row.getScreenshotUrl()));
-        response.setUrlscanScanId(emptyIfNull(row.getUrlscanScanId()));
+        String urlscanScanId = emptyIfNull(row.getUrlscanScanId());
+        response.setUrlscanScanId(urlscanScanId);
+        response.setScreenshotUrl(normalizeUrl(row.getScreenshotUrl(), buildUrlscanScreenshotUrl(urlscanScanId)));
+        response.setResultUrl(buildUrlscanResultUrl(urlscanScanId));
         return response;
+    }
+
+    private String buildUrlscanScreenshotUrl(String urlscanScanId) {
+        if (urlscanScanId == null || urlscanScanId.isBlank()) {
+            return "";
+        }
+        return "https://urlscan.io/screenshots/" + urlscanScanId + ".png";
+    }
+
+    private String buildUrlscanResultUrl(String urlscanScanId) {
+        if (urlscanScanId == null || urlscanScanId.isBlank()) {
+            return "";
+        }
+        return "https://urlscan.io/result/" + urlscanScanId + "/";
     }
 
     private List<String> parseRedirectChain(String redirectChain, String fallbackUrl) {
