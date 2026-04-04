@@ -53,7 +53,7 @@ class UrlScannerControllerTest {
 
     @Test
     void shouldSubmitAsyncScanAndReturnAccepted() throws Exception {
-        when(urlScannerService.submitAsyncScan("https://example.com")).thenReturn("job-123");
+        when(urlScannerService.submitAsyncScan("https://example.com", "10.10.10.10")).thenReturn("job-123");
 
         UrlScanRequest request = new UrlScanRequest();
         request.setUrl("  https://example.com  ");
@@ -61,15 +61,18 @@ class UrlScannerControllerTest {
         mockMvc.perform(post("/api/scan")
                         .with(user("tester").roles("USER"))
                         .with(csrf())
+                        .header("X-Forwarded-For", "10.10.10.10")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isAccepted())
                                 .andExpect(jsonPath("$.scanId").value("job-123"))
                 .andExpect(jsonPath("$.status").value("IN_PROGRESS"));
 
-        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
-        verify(urlScannerService, times(1)).submitAsyncScan(captor.capture());
-        org.junit.jupiter.api.Assertions.assertEquals("https://example.com", captor.getValue());
+        ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> ipCaptor = ArgumentCaptor.forClass(String.class);
+        verify(urlScannerService, times(1)).submitAsyncScan(urlCaptor.capture(), ipCaptor.capture());
+        org.junit.jupiter.api.Assertions.assertEquals("https://example.com", urlCaptor.getValue());
+        org.junit.jupiter.api.Assertions.assertEquals("10.10.10.10", ipCaptor.getValue());
     }
 
     @Test
@@ -85,7 +88,7 @@ class UrlScannerControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value(400));
 
-        verify(urlScannerService, never()).submitAsyncScan(anyString());
+        verify(urlScannerService, never()).submitAsyncScan(anyString(), anyString());
     }
 
     @Test
@@ -120,7 +123,7 @@ class UrlScannerControllerTest {
 
     @Test
     void shouldPropagateTooManyRequestsOnAsyncOverload() throws Exception {
-        when(urlScannerService.submitAsyncScan("https://example.com"))
+        when(urlScannerService.submitAsyncScan("https://example.com", "127.0.0.1"))
                 .thenThrow(new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "Too many async scan jobs"));
 
         UrlScanRequest request = new UrlScanRequest();

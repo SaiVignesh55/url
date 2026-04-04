@@ -33,6 +33,15 @@ public class ClickEvent {
     @Column(name = "user_agent", length = 1024)
     private String userAgent;
 
+    @Column(name = "country", length = 100)
+    private String country;
+
+    @Column(name = "region", length = 100)
+    private String region;
+
+    @Column(name = "city", length = 100)
+    private String city;
+
     @ManyToOne(optional = false)
     @JoinColumn(name = "url_mapping_id", nullable = false)
     private UrlMapping urlMapping;

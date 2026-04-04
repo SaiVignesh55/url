@@ -21,7 +21,12 @@ const Navbar = () => {
     { path: "/", label: "Home" },
     { path: "/about", label: "About" },
     { path: "/scanner", label: "URL Scanner" },
-    ...(token ? [{ path: "/dashboard", label: "Dashboard" }] : []),
+    ...(token
+      ? [
+          { path: "/region-analytics", label: "Region Analytics" },
+          { path: "/dashboard", label: "Dashboard" },
+        ]
+      : []),
   ];
 
   return (

@@ -66,6 +66,15 @@ public class UrlScanResult {
     @Column(name = "domain_risk", nullable = false)
     private Integer domainRisk;
 
+    @Column(name = "country", length = 100)
+    private String country;
+
+    @Column(name = "region", length = 100)
+    private String region;
+
+    @Column(name = "city", length = 100)
+    private String city;
+
     @ManyToOne
     @JoinColumn(name = "user_id")
     private User user;

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import api from "../api/api"
+import api, { regionAnalyticsApi } from "../api/api"
 
 
 export const useFetchMyShortUrls = (token, onError) => {
@@ -61,6 +61,31 @@ export const useFetchTotalClicks = (token, onError) => {
 
             return data?.data?.clicksByDate ?? [];
         },
+        onError,
+        staleTime: 5000,
+    });
+};
+
+export const useFetchRegionStats = (token, onError) => {
+    return useQuery({
+        queryKey: ["region-stats"],
+        queryFn: async () => {
+            const response = await regionAnalyticsApi.getRegionStats(token);
+            return response?.data ?? [];
+        },
+        select: (data) => {
+            if (!Array.isArray(data)) {
+                return [];
+            }
+
+            return data
+                .map((item) => ({
+                    region: item?.region || "UNKNOWN",
+                    count: Number(item?.count || 0),
+                }))
+                .sort((a, b) => b.count - a.count);
+        },
+        enabled: Boolean(token),
         onError,
         staleTime: 5000,
     });

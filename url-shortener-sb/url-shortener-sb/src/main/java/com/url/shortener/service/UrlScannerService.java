@@ -119,6 +119,10 @@ public class UrlScannerService {
     private final Map<String, AsyncScanJob> asyncJobs = new ConcurrentHashMap<>();
 
     public UrlScanResponse scanUrl(String url) {
+        return scanUrl(url, null);
+    }
+
+    public UrlScanResponse scanUrl(String url, String ipAddress) {
         // STEP 1: normalize URL
         UrlNormalizationService.NormalizedUrl normalized = urlNormalizationService.normalizeAndValidate(url);
         log.debug("Pipeline step1 normalize complete: {}", maskUrl(normalized.normalizedUrl()));
@@ -183,7 +187,7 @@ public class UrlScannerService {
         UrlScanResponse response = buildResponse(normalized.normalizedUrl(), finalUrl, chain, behavior, state, finalScore, verdict);
 
         try {
-            urlScanResultService.saveScanResult(response);
+            urlScanResultService.saveScanResult(response, ipAddress);
         } catch (Exception ex) {
             log.error("Continuing despite DB persistence failure for {}", maskUrl(normalized.normalizedUrl()), ex);
         }
@@ -496,6 +500,10 @@ public class UrlScannerService {
     }
 
     public String submitAsyncScan(String url) {
+        return submitAsyncScan(url, null);
+    }
+
+    public String submitAsyncScan(String url, String ipAddress) {
         cleanupExpiredAsyncJobs();
         long pendingJobs = asyncJobs.values().stream().filter(AsyncScanJob::isPending).count();
         if (pendingJobs >= Math.max(1, maxAsyncJobs)) {
@@ -503,15 +511,15 @@ public class UrlScannerService {
         }
 
         String scanId = UUID.randomUUID().toString();
-        AsyncScanJob job = new AsyncScanJob(scanId, url);
+        AsyncScanJob job = new AsyncScanJob(scanId, url, ipAddress);
         asyncJobs.put(scanId, job);
 
         CompletableFuture
-                .supplyAsync(() -> scanUrl(url), scanTaskExecutor)
+                .supplyAsync(() -> scanUrl(url, ipAddress), scanTaskExecutor)
                 .orTimeout(asyncTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
                 .whenComplete((result, throwable) -> {
                     if (throwable != null) {
-                        completeUnknown(scanId, url, throwable);
+                        completeUnknown(scanId, url, ipAddress, throwable);
                     } else {
                         completeJob(scanId, result);
                     }
@@ -529,7 +537,7 @@ public class UrlScannerService {
 
         if (job.isPending() && isJobTimedOut(job)) {
             log.warn("Auto-finalizing stale scan job {} after timeout window", scanId);
-            completeUnknown(scanId, job.requestedUrl, new TimeoutException("Async scan exceeded timeout window"));
+            completeUnknown(scanId, job.requestedUrl, job.requestedIp, new TimeoutException("Async scan exceeded timeout window"));
             job = asyncJobs.get(scanId);
         }
 
@@ -919,7 +927,7 @@ public class UrlScannerService {
         return count;
     }
 
-    private void completeUnknown(String scanId, String inputUrl, Throwable throwable) {
+    private void completeUnknown(String scanId, String inputUrl, String ipAddress, Throwable throwable) {
         Throwable root = throwable instanceof CompletionException && throwable.getCause() != null
                 ? throwable.getCause()
                 : throwable;
@@ -950,7 +958,7 @@ public class UrlScannerService {
         unknown.setVerdict("UNKNOWN");
 
         try {
-            UrlScanResponse fallback = scanUrl(inputUrl);
+            UrlScanResponse fallback = scanUrl(inputUrl, ipAddress);
             if (fallback != null && !"UNKNOWN".equalsIgnoreCase(fallback.getStatus())) {
                 List<String> reasons = fallback.getReasons() == null ? new ArrayList<>() : new ArrayList<>(fallback.getReasons());
                 reasons.add("Async timeout recovered using fallback completion");
@@ -1124,15 +1132,17 @@ public class UrlScannerService {
     private static class AsyncScanJob {
         private final String scanId;
         private final String requestedUrl;
+        private final String requestedIp;
         private final long createdAtMs;
         private volatile String status;
         private volatile UrlScanResponse result;
         private volatile String errorMessage;
         private volatile long completedAtMs;
 
-        private AsyncScanJob(String scanId, String requestedUrl) {
+        private AsyncScanJob(String scanId, String requestedUrl, String requestedIp) {
             this.scanId = scanId;
             this.requestedUrl = requestedUrl;
+            this.requestedIp = requestedIp;
             this.createdAtMs = System.currentTimeMillis();
             this.status = "PENDING";
             this.result = null;

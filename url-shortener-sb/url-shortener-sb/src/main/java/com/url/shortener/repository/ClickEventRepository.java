@@ -20,6 +20,11 @@ public interface ClickEventRepository extends JpaRepository<ClickEvent, Long> {
         Long getCount();
     }
 
+    interface RegionCountProjection {
+        String getRegion();
+        Long getCount();
+    }
+
     List<ClickEvent> findByUrlMappingAndClickDateBetween(UrlMapping mapping, LocalDateTime startDate, LocalDateTime endDate);
 
     List<ClickEvent> findByUrlMappingInAndClickDateBetween(List<UrlMapping> urlMappings, LocalDateTime startDate, LocalDateTime endDate);
@@ -59,4 +64,13 @@ public interface ClickEventRepository extends JpaRepository<ClickEvent, Long> {
             LocalDateTime startDate,
             LocalDateTime endDateExclusive
     );
+
+    @Query("""
+            select coalesce(ce.region, 'UNKNOWN') as region, count(ce.id) as count
+            from ClickEvent ce
+            where ce.urlMapping.user = :user
+            group by coalesce(ce.region, 'UNKNOWN')
+            order by count(ce.id) desc
+            """)
+    List<RegionCountProjection> aggregateRegionCountsByUser(@Param("user") User user);
 }

@@ -2,6 +2,7 @@ package com.url.shortener.service;
 
 import com.url.shortener.dtos.AnalyticsResponseDTO;
 import com.url.shortener.dtos.ClickEventDTO;
+import com.url.shortener.dtos.GeoData;
 import com.url.shortener.dtos.UrlAnalyticsResponseDTO;
 import com.url.shortener.models.ClickEvent;
 import com.url.shortener.models.UrlMapping;
@@ -28,13 +29,16 @@ class UrlMappingServiceTest {
 
     private UrlMappingRepository urlMappingRepository;
     private ClickEventRepository clickEventRepository;
+    private GeoApiService geoApiService;
     private UrlMappingService service;
 
     @BeforeEach
     void setUp() {
         urlMappingRepository = mock(UrlMappingRepository.class);
         clickEventRepository = mock(ClickEventRepository.class);
-        service = new UrlMappingService(urlMappingRepository, clickEventRepository);
+        geoApiService = mock(GeoApiService.class);
+        when(geoApiService.getRegion(any())).thenReturn(new GeoData("UNKNOWN", "UNKNOWN", "UNKNOWN"));
+        service = new UrlMappingService(urlMappingRepository, clickEventRepository, geoApiService);
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.url.shortener.service;
 import com.url.shortener.dtos.AnalyticsResponseDTO;
 import com.url.shortener.dtos.AnalyticsPointDTO;
 import com.url.shortener.dtos.ClickEventDTO;
+import com.url.shortener.dtos.GeoData;
 import com.url.shortener.dtos.UrlAnalyticsResponseDTO;
 import com.url.shortener.dtos.UrlMappingDTO;
 import com.url.shortener.models.ClickEvent;
@@ -29,6 +30,7 @@ public class UrlMappingService {
 
     private final UrlMappingRepository urlMappingRepository;
     private final ClickEventRepository clickEventRepository;
+    private final GeoApiService geoApiService;
 
     public UrlMappingDTO createShortUrl(String originalUrl, User user) {
         String shortUrl = generateShortUrl();
@@ -171,7 +173,16 @@ public class UrlMappingService {
         clickEvent.setUrlMapping(urlMapping);
         clickEvent.setIpAddress(trimValue(ipAddress, 64));
         clickEvent.setUserAgent(trimValue(userAgent, 1024));
+
+        log.info("IP DETECTED: {}", clickEvent.getIpAddress());
+        GeoData geo = geoApiService.getRegion(clickEvent.getIpAddress());
+        clickEvent.setCountry(trimValue(geo.getCountry(), 100));
+        clickEvent.setRegion(trimValue(geo.getRegion(), 100));
+        clickEvent.setCity(trimValue(geo.getCity(), 100));
+        log.info("REGION FETCHED: {}", clickEvent.getRegion());
+
         clickEventRepository.save(clickEvent);
+        log.info("SAVED TO DB");
 
         log.info("Saved click event for shortUrl={} urlMappingId={} timestamp={} ip={}",
                 shortUrl,

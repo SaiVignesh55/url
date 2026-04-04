@@ -1,6 +1,7 @@
 package com.url.shortener.service;
 
 import com.url.shortener.dtos.UrlScanResponse;
+import com.url.shortener.dtos.GeoData;
 import com.url.shortener.models.UrlScanResult;
 import com.url.shortener.repository.UrlScanResultRepository;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +23,7 @@ import java.util.Optional;
 public class UrlScanResultService {
 
     private final UrlScanResultRepository urlScanResultRepository;
+    private final GeoApiService geoApiService;
 
     @Transactional(readOnly = true)
     public Optional<UrlScanResponse> findByScannedUrl(String scannedUrl) {
@@ -50,6 +52,11 @@ public class UrlScanResultService {
 
     @Transactional
     public UrlScanResult saveScanResult(UrlScanResponse response) {
+        return saveScanResult(response, null);
+    }
+
+    @Transactional
+    public UrlScanResult saveScanResult(UrlScanResponse response, String ipAddress) {
         UrlScanResult scanResult = new UrlScanResult();
         String scannedUrl = normalizeUrl(response.getScannedUrl(), response.getFinalUrl());
         String verdict = normalizeVerdict(response.getVerdict(), response.getStatus());
@@ -75,9 +82,17 @@ public class UrlScanResultService {
         scanResult.setFinalUrl(normalizeUrl(response.getFinalUrl(), scannedUrl));
         scanResult.setCreatedAt(LocalDateTime.now(ZoneOffset.UTC));
 
+        log.info("IP DETECTED: {}", ipAddress);
+        GeoData geo = geoApiService.getRegion(ipAddress);
+        scanResult.setCountry(trimValue(geo.getCountry(), 100));
+        scanResult.setRegion(trimValue(geo.getRegion(), 100));
+        scanResult.setCity(trimValue(geo.getCity(), 100));
+        log.info("REGION FETCHED: {}", scanResult.getRegion());
+
         try {
             log.info("Saving scan result for scannedUrl={} status={}", scannedUrl, status);
             UrlScanResult saved = urlScanResultRepository.save(scanResult);
+            log.info("SAVED TO DB");
             log.info("Saved scan result with id={}", saved.getId());
             return saved;
         } catch (Exception ex) {
@@ -245,6 +260,13 @@ public class UrlScanResultService {
 
     private String emptyIfNull(String value) {
         return value == null ? "" : value;
+    }
+
+    private String trimValue(String value, int maxLength) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.length() <= maxLength ? value : value.substring(0, maxLength);
     }
 }
 
