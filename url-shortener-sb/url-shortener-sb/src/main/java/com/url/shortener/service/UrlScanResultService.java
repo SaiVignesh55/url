@@ -82,6 +82,12 @@ public class UrlScanResultService {
         scanResult.setCountry(trimValue(geo.getCountry(), 100));
         scanResult.setRegion(trimValue(geo.getRegion(), 100));
         scanResult.setCity(trimValue(geo.getCity(), 100));
+        log.info("PRE-SAVE SCAN GEO: scannedUrl={} finalUrl={} country={} region={} city={}",
+                scanResult.getScannedUrl(),
+                scanResult.getFinalUrl(),
+                scanResult.getCountry(),
+                scanResult.getRegion(),
+                scanResult.getCity());
 
         try {
             log.info("Saving scan result for scannedUrl={} status={}", scannedUrl, status);

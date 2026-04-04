@@ -178,6 +178,12 @@ public class UrlMappingService {
         clickEvent.setCountry(trimValue(geo.getCountry(), 100));
         clickEvent.setRegion(trimValue(geo.getRegion(), 100));
         clickEvent.setCity(trimValue(geo.getCity(), 100));
+        log.info("PRE-SAVE CLICK GEO: shortUrl={} targetUrl={} country={} region={} city={}",
+                shortUrl,
+                urlMapping.getOriginalUrl(),
+                clickEvent.getCountry(),
+                clickEvent.getRegion(),
+                clickEvent.getCity());
 
         clickEventRepository.save(clickEvent);
         log.info("SAVED TO DB");
