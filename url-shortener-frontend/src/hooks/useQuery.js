@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import api, { regionAnalyticsApi } from "../api/api"
+import api, { linksApi, regionAnalyticsApi } from "../api/api"
 
 
 export const useFetchMyShortUrls = (token, onError) => {
@@ -18,10 +18,9 @@ export const useFetchMyShortUrls = (token, onError) => {
             );
         },
         select: (data) => {
-            const sortedData = data.data.sort(
+            return data.data.sort(
                 (a, b) => new Date(b.createdDate) - new Date(a.createdDate)
             );
-            return sortedData;
         },
         onError,
         staleTime: 5000,
@@ -66,11 +65,37 @@ export const useFetchTotalClicks = (token, onError) => {
     });
 };
 
-export const useFetchRegionStats = (token, onError) => {
+export const useFetchMyLinks = (token, onError) => {
     return useQuery({
-        queryKey: ["region-stats"],
+        queryKey: ["my-links"],
         queryFn: async () => {
-            const response = await regionAnalyticsApi.getRegionStats(token);
+            const response = await linksApi.getMyLinks(token);
+            return response?.data ?? [];
+        },
+        select: (data) => {
+            if (!Array.isArray(data)) {
+                return [];
+            }
+
+            return data.map((item) => ({
+                shortCode: item?.shortUrl || item?.shortCode || "",
+                originalUrl: item?.originalUrl || "",
+            })).filter((item) => item.shortCode);
+        },
+        enabled: Boolean(token),
+        onError,
+        staleTime: 5000,
+    });
+};
+
+
+export const useFetchRegionStatsByShortCode = (token, shortCode, onError) => {
+    return useQuery({
+        queryKey: ["region-stats", shortCode],
+        queryFn: async () => {
+            console.log("selected shortCode:", shortCode);
+            const response = await regionAnalyticsApi.getRegionStatsByShortCode(shortCode, token);
+            console.log("region analytics response:", response?.data);
             return response?.data ?? [];
         },
         select: (data) => {
@@ -85,7 +110,7 @@ export const useFetchRegionStats = (token, onError) => {
                 }))
                 .sort((a, b) => b.count - a.count);
         },
-        enabled: Boolean(token),
+        enabled: Boolean(token && shortCode),
         onError,
         staleTime: 5000,
     });

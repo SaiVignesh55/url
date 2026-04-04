@@ -31,7 +31,7 @@ public class RedirectController {
         String forwardedFor = request.getHeader("X-Forwarded-For");
         String ipAddress = (forwardedFor != null && !forwardedFor.isBlank())
                 ? forwardedFor.split(",")[0].trim()
-                : request.getRemoteAddr();
+                : null;
         String userAgent = request.getHeader("User-Agent");
 
         UrlMapping urlMapping = urlMappingService.getOriginalUrl(code, ipAddress, userAgent);

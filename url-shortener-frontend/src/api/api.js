@@ -9,9 +9,20 @@ export const scannerApi = {
   getScanStatus: (scanId) => api.get(`/api/status/${scanId}`),
 };
 
+export const linksApi = {
+  getMyLinks: (token) =>
+    api.get("/api/urls/myurls", {
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    }),
+};
+
 export const regionAnalyticsApi = {
-  getRegionStats: (token) =>
-    api.get("/api/region-stats", {
+  getRegionStatsByShortCode: (shortCode, token) =>
+    api.get(`/api/region-stats/${shortCode}`, {
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",

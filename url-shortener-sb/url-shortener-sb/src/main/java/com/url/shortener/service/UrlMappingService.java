@@ -174,12 +174,10 @@ public class UrlMappingService {
         clickEvent.setIpAddress(trimValue(ipAddress, 64));
         clickEvent.setUserAgent(trimValue(userAgent, 1024));
 
-        log.info("IP DETECTED: {}", clickEvent.getIpAddress());
-        GeoData geo = geoApiService.getRegion(clickEvent.getIpAddress());
+        GeoData geo = geoApiService.getRegionFromUrl(urlMapping.getOriginalUrl());
         clickEvent.setCountry(trimValue(geo.getCountry(), 100));
         clickEvent.setRegion(trimValue(geo.getRegion(), 100));
         clickEvent.setCity(trimValue(geo.getCity(), 100));
-        log.info("REGION FETCHED: {}", clickEvent.getRegion());
 
         clickEventRepository.save(clickEvent);
         log.info("SAVED TO DB");

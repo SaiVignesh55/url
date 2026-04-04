@@ -37,7 +37,7 @@ class UrlMappingServiceTest {
         urlMappingRepository = mock(UrlMappingRepository.class);
         clickEventRepository = mock(ClickEventRepository.class);
         geoApiService = mock(GeoApiService.class);
-        when(geoApiService.getRegion(any())).thenReturn(new GeoData("UNKNOWN", "UNKNOWN", "UNKNOWN"));
+        when(geoApiService.getRegionFromUrl(any())).thenReturn(new GeoData("UNKNOWN", "UNKNOWN", "UNKNOWN"));
         service = new UrlMappingService(urlMappingRepository, clickEventRepository, geoApiService);
     }
 

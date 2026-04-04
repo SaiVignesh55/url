@@ -5,7 +5,6 @@ import com.url.shortener.dtos.UrlScanAsyncSubmitResponse;
 import com.url.shortener.dtos.UrlScanRequest;
 import com.url.shortener.dtos.UrlScanResponse;
 import com.url.shortener.service.UrlScannerService;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import org.slf4j.Logger;
@@ -29,15 +28,12 @@ public class UrlScannerController {
     private final UrlScannerService urlScannerService;
 
     @PostMapping("/scan")
-    public ResponseEntity<UrlScanAsyncSubmitResponse> scanUrl(@Valid @RequestBody UrlScanRequest request,
-                                                               HttpServletRequest servletRequest) {
+    public ResponseEntity<UrlScanAsyncSubmitResponse> scanUrl(@Valid @RequestBody UrlScanRequest request) {
         String requestedUrl = request.getUrl().trim();
-        String ipAddress = extractClientIp(servletRequest);
-        log.info("IP DETECTED: {}", ipAddress);
         log.info("Received scan request for url={}", requestedUrl);
         System.out.println("SCAN REQUEST RECEIVED: " + requestedUrl);
 
-        String scanId = urlScannerService.submitAsyncScan(requestedUrl, ipAddress);
+        String scanId = urlScannerService.submitAsyncScan(requestedUrl);
         UrlScanAsyncSubmitResponse response = new UrlScanAsyncSubmitResponse(scanId, "IN_PROGRESS");
 
         log.info("Returning scan submit response: scanId={}, status={}", response.getScanId(), response.getStatus());
@@ -85,11 +81,4 @@ public class UrlScannerController {
                 || "UNKNOWN".equalsIgnoreCase(status);
     }
 
-    private String extractClientIp(HttpServletRequest request) {
-        String forwardedFor = request.getHeader("X-Forwarded-For");
-        if (forwardedFor != null && !forwardedFor.isBlank()) {
-            return forwardedFor.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
-    }
 }

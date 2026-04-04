@@ -52,11 +52,6 @@ public class UrlScanResultService {
 
     @Transactional
     public UrlScanResult saveScanResult(UrlScanResponse response) {
-        return saveScanResult(response, null);
-    }
-
-    @Transactional
-    public UrlScanResult saveScanResult(UrlScanResponse response, String ipAddress) {
         UrlScanResult scanResult = new UrlScanResult();
         String scannedUrl = normalizeUrl(response.getScannedUrl(), response.getFinalUrl());
         String verdict = normalizeVerdict(response.getVerdict(), response.getStatus());
@@ -82,12 +77,11 @@ public class UrlScanResultService {
         scanResult.setFinalUrl(normalizeUrl(response.getFinalUrl(), scannedUrl));
         scanResult.setCreatedAt(LocalDateTime.now(ZoneOffset.UTC));
 
-        log.info("IP DETECTED: {}", ipAddress);
-        GeoData geo = geoApiService.getRegion(ipAddress);
+        String targetUrl = normalizeUrl(scanResult.getFinalUrl(), scanResult.getScannedUrl());
+        GeoData geo = geoApiService.getRegionFromUrl(targetUrl);
         scanResult.setCountry(trimValue(geo.getCountry(), 100));
         scanResult.setRegion(trimValue(geo.getRegion(), 100));
         scanResult.setCity(trimValue(geo.getCity(), 100));
-        log.info("REGION FETCHED: {}", scanResult.getRegion());
 
         try {
             log.info("Saving scan result for scannedUrl={} status={}", scannedUrl, status);

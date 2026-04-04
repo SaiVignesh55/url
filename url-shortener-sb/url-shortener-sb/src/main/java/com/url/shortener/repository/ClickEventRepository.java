@@ -20,7 +20,9 @@ public interface ClickEventRepository extends JpaRepository<ClickEvent, Long> {
         Long getCount();
     }
 
-    interface RegionCountProjection {
+
+    interface ShortUrlRegionCountProjection {
+        String getShortUrl();
         String getRegion();
         Long getCount();
     }
@@ -66,11 +68,28 @@ public interface ClickEventRepository extends JpaRepository<ClickEvent, Long> {
     );
 
     @Query("""
-            select coalesce(ce.region, 'UNKNOWN') as region, count(ce.id) as count
+            select ce.urlMapping.shortUrl as shortUrl,
+                   coalesce(ce.region, 'UNKNOWN') as region,
+                   count(ce.id) as count
             from ClickEvent ce
             where ce.urlMapping.user = :user
-            group by coalesce(ce.region, 'UNKNOWN')
+              and ce.urlMapping.shortUrl = :shortCode
+            group by ce.urlMapping.shortUrl, coalesce(ce.region, 'UNKNOWN')
             order by count(ce.id) desc
             """)
-    List<RegionCountProjection> aggregateRegionCountsByUser(@Param("user") User user);
+    List<ShortUrlRegionCountProjection> aggregateRegionCountsByShortCode(
+            @Param("user") User user,
+            @Param("shortCode") String shortCode
+    );
+
+    @Query("""
+            select ce.urlMapping.shortUrl as shortUrl,
+                   coalesce(ce.region, 'UNKNOWN') as region,
+                   count(ce.id) as count
+            from ClickEvent ce
+            where ce.urlMapping.user = :user
+            group by ce.urlMapping.shortUrl, coalesce(ce.region, 'UNKNOWN')
+            order by ce.urlMapping.shortUrl asc, count(ce.id) desc
+            """)
+    List<ShortUrlRegionCountProjection> aggregateRegionCountsGlobalByUser(@Param("user") User user);
 }
