@@ -10,6 +10,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useStoreContext } from '../../contextApi/ContextApi';
 import { Hourglass } from 'react-loader-spinner';
 import Graph from './Graph';
+import toast from 'react-hot-toast';
 
 const ShortenItem = ({ originalUrl, shortUrl, clickCount, createdDate }) => {
     const { token } = useStoreContext();
@@ -19,6 +20,9 @@ const ShortenItem = ({ originalUrl, shortUrl, clickCount, createdDate }) => {
     const [loader, setLoader] = useState(false);
     const [selectedUrl, setSelectedUrl] = useState("");
     const [analyticsData, setAnalyticsData] = useState([]);
+    const [showQrCode, setShowQrCode] = useState(false);
+    const [qrLoading, setQrLoading] = useState(false);
+    const [qrPayload, setQrPayload] = useState(null);
     const backendBaseUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:9000";
 
     const subDomain = backendBaseUrl.replace(
@@ -32,6 +36,46 @@ const ShortenItem = ({ originalUrl, shortUrl, clickCount, createdDate }) => {
         }
         setAnalyticToggle(!analyticToggle);
     }
+
+    const qrCodeHandler = async () => {
+      if (showQrCode) {
+        setShowQrCode(false);
+        return;
+      }
+
+      if (qrPayload) {
+        setShowQrCode(true);
+        return;
+      }
+
+      setQrLoading(true);
+      try {
+        const { data } = await api.get(`/api/qr/${shortUrl}`, {
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Authorization: "Bearer " + token,
+          },
+        });
+        setQrPayload(data);
+        setShowQrCode(true);
+      } catch (error) {
+        const message = error?.response?.data?.message || "Unable to load QR code";
+        toast.error(message);
+      } finally {
+        setQrLoading(false);
+      }
+    };
+
+    const downloadQrCodeHandler = () => {
+      if (!qrPayload?.base64Png) {
+        return;
+      }
+      const link = document.createElement("a");
+      link.href = `data:image/png;base64,${qrPayload.base64Png}`;
+      link.download = `${shortUrl}-qr.png`;
+      link.click();
+    };
 
     const fetchMyShortUrl = useCallback(async () => {
         setLoader(true);
@@ -53,7 +97,7 @@ const ShortenItem = ({ originalUrl, shortUrl, clickCount, createdDate }) => {
             setAnalyticsData(data?.clicksOverTime ?? []);
             setSelectedUrl("");
             
-        } catch (error) {
+        } catch {
             navigate("/error");
         } finally {
             setLoader(false);
@@ -137,8 +181,35 @@ const ShortenItem = ({ originalUrl, shortUrl, clickCount, createdDate }) => {
                 <button>Analytics</button>
                 <MdAnalytics className="text-md" />
           </div>
+
+          <div
+                onClick={qrCodeHandler}
+                className="flex cursor-pointer gap-1 items-center bg-sky-600/90 py-2 font-semibold shadow-lg shadow-sky-700/30 px-6 rounded-xl text-white hover:-translate-y-1 transition-all duration-300"
+            >
+                <button>{qrLoading ? "Loading..." : showQrCode ? "Hide QR" : "Show QR Code"}</button>
+          </div>
           </div>
         </div>
+
+      {showQrCode && qrPayload?.base64Png && (
+        <div className="border-t border-slate-700/60 pt-4 pb-2 flex sm:flex-row flex-col items-center gap-4">
+          <img
+            src={`data:image/png;base64,${qrPayload.base64Png}`}
+            alt={`QR code for ${shortUrl}`}
+            className="w-40 h-40 rounded-md bg-white p-2"
+          />
+          <div className="flex flex-col sm:items-start items-center gap-2 text-slate-200">
+            <p className="text-sm break-all">{qrPayload.shortUrl}</p>
+            <button
+              onClick={downloadQrCodeHandler}
+              className="bg-emerald-600/90 px-4 py-2 rounded-lg text-white font-semibold hover:-translate-y-1 transition-all duration-300"
+            >
+              Download QR
+            </button>
+          </div>
+        </div>
+      )}
+
     <React.Fragment>
         <div className={`${
             analyticToggle ? "flex" : "hidden"

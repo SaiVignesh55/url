@@ -31,6 +31,7 @@ import java.util.Locale;
 import java.util.Random;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.Optional;
 
 @Service
 @Slf4j
@@ -149,6 +150,10 @@ public class UrlMappingService {
         return urlMappingRepository.findByUser(user).stream()
                 .map(this::convertToDto)
                 .toList();
+    }
+
+    public Optional<UrlMapping> getUrlByShortCodeForUser(String shortCode, User user) {
+        return urlMappingRepository.findByShortUrlAndUser(shortCode, user);
     }
 
     public List<ClickEventDTO> getClickEventsByDate(String shortUrl, LocalDate startDate, LocalDate endDate) {

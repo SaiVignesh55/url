@@ -41,4 +41,15 @@ export const cityAnalyticsApi = {
   },
 };
 
+export const qrApi = {
+  getQrByShortCode: (shortCode, token) =>
+    api.get(`/api/qr/${shortCode}`, {
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    }),
+};
+
 export default api;

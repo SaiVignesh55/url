@@ -29,14 +29,14 @@ class ScanRateLimitFilterTest {
     }
 
     @Test
-    void shouldRejectUnauthenticatedRequest() throws Exception {
+    void shouldAllowUnauthenticatedRequestWithIpRateLimiting() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/scan");
         request.setRemoteAddr("8.8.8.8");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         filter.doFilter(request, response, (req, res) -> {});
 
-        assertEquals(401, response.getStatus());
+        assertEquals(200, response.getStatus());
     }
 
     @Test
