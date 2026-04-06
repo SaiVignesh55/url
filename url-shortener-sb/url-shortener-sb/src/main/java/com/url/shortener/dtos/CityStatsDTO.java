@@ -5,9 +5,10 @@ import lombok.Data;
 
 @Data
 @AllArgsConstructor
-public class RegionStatsByLinkDTO {
-    private String shortUrl;
-    private String region;
+public class CityStatsDTO {
+    private String city;
     private Long count;
 }
+
+
 

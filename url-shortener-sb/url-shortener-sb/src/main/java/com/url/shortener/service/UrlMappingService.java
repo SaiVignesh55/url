@@ -174,16 +174,17 @@ public class UrlMappingService {
         clickEvent.setIpAddress(trimValue(ipAddress, 64));
         clickEvent.setUserAgent(trimValue(userAgent, 1024));
 
-        GeoData geo = geoApiService.getRegionFromUrl(urlMapping.getOriginalUrl());
+        GeoData geo = geoApiService.getRegionFromIp(ipAddress);
         clickEvent.setCountry(trimValue(geo.getCountry(), 100));
         clickEvent.setRegion(trimValue(geo.getRegion(), 100));
         clickEvent.setCity(trimValue(geo.getCity(), 100));
-        log.info("PRE-SAVE CLICK GEO: shortUrl={} targetUrl={} country={} region={} city={}",
+        log.info("PRE-SAVE CLICK GEO: shortUrl={} ipAddress={} country={} region={} city={}",
                 shortUrl,
-                urlMapping.getOriginalUrl(),
+                clickEvent.getIpAddress(),
                 clickEvent.getCountry(),
                 clickEvent.getRegion(),
                 clickEvent.getCity());
+        log.info("COUNTRY SAVED: {}", clickEvent.getCountry());
 
         clickEventRepository.save(clickEvent);
         log.info("SAVED TO DB");

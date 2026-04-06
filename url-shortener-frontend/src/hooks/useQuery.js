@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import api, { linksApi, regionAnalyticsApi } from "../api/api"
+import api, { cityAnalyticsApi, linksApi } from "../api/api"
 
 
 export const useFetchMyShortUrls = (token, onError) => {
@@ -89,13 +89,11 @@ export const useFetchMyLinks = (token, onError) => {
 };
 
 
-export const useFetchRegionStatsByShortCode = (token, shortCode, onError) => {
+export const useFetchCityStatsByShortCode = (token, shortCode, onError) => {
     return useQuery({
-        queryKey: ["region-stats", shortCode],
+        queryKey: ["city-stats", shortCode],
         queryFn: async () => {
-            console.log("selected shortCode:", shortCode);
-            const response = await regionAnalyticsApi.getRegionStatsByShortCode(shortCode, token);
-            console.log("region analytics response:", response?.data);
+            const response = await cityAnalyticsApi.getCityStatsByShortCode(shortCode, token);
             return response?.data ?? [];
         },
         select: (data) => {
@@ -105,7 +103,7 @@ export const useFetchRegionStatsByShortCode = (token, shortCode, onError) => {
 
             return data
                 .map((item) => ({
-                    region: item?.region || "UNKNOWN",
+                    city: item?.city || "UNKNOWN",
                     count: Number(item?.count || 0),
                 }))
                 .sort((a, b) => b.count - a.count);

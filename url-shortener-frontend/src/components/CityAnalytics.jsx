@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { motion as Motion } from "framer-motion";
 import { Bar } from "react-chartjs-2";
 import {
@@ -11,11 +11,11 @@ import {
 } from "chart.js";
 import { useNavigate } from "react-router-dom";
 import { useStoreContext } from "../contextApi/ContextApi";
-import { useFetchMyLinks, useFetchRegionStatsByShortCode } from "../hooks/useQuery";
+import { useFetchCityStatsByShortCode, useFetchMyLinks } from "../hooks/useQuery";
 
 ChartJS.register(BarElement, CategoryScale, LinearScale, Legend, Tooltip);
 
-const RegionAnalytics = () => {
+const CityAnalytics = () => {
   const navigate = useNavigate();
   const { token } = useStoreContext();
   const [selectedShortCode, setSelectedShortCode] = useState("");
@@ -27,28 +27,32 @@ const RegionAnalytics = () => {
     refetch: refetchLinks,
   } = useFetchMyLinks(token, () => {});
 
-  const {
-    data: regionStats = [],
-    isLoading: isRegionLoading,
-    isFetching: isRegionFetching,
-    isError: isRegionError,
-    refetch: refetchRegion,
-  } = useFetchRegionStatsByShortCode(token, selectedShortCode, () => {});
 
-  useEffect(() => {
-    if (!selectedShortCode && links.length > 0) {
-      setSelectedShortCode(links[0].shortCode);
-    }
-  }, [links, selectedShortCode]);
+  const activeShortCode = selectedShortCode || links[0]?.shortCode || "";
+
+  const {
+    data: cityStats = [],
+    isLoading: isCityLoading,
+    isFetching: isCityFetching,
+    isError: isCityError,
+    error: cityError,
+    refetch: refetchCity,
+  } = useFetchCityStatsByShortCode(token, activeShortCode, () => {});
+
+  const cityErrorMessage =
+    cityError?.response?.data?.message ||
+    cityError?.response?.data?.error ||
+    cityError?.message ||
+    "Failed to load city data";
 
   const selectedLink = useMemo(
-    () => links.find((item) => item.shortCode === selectedShortCode) || null,
-    [links, selectedShortCode]
+    () => links.find((item) => item.shortCode === activeShortCode) || null,
+    [links, activeShortCode]
   );
 
-  const topRegion = regionStats.length > 0 ? regionStats[0] : null;
+  const topCity = cityStats.length > 0 ? cityStats[0] : null;
 
-  const isLoading = isLinksLoading || isRegionLoading || isRegionFetching;
+  const isLoading = isLinksLoading || isCityLoading || isCityFetching;
 
   const selectedDomain = useMemo(() => {
     if (!selectedLink?.originalUrl) {
@@ -64,11 +68,11 @@ const RegionAnalytics = () => {
   }, [selectedLink]);
 
   const chartData = {
-    labels: regionStats.map((item) => item.region),
+    labels: cityStats.map((item) => item.city),
     datasets: [
       {
         label: "Visits",
-        data: regionStats.map((item) => item.count),
+        data: cityStats.map((item) => item.count),
         backgroundColor: "rgba(96, 165, 250, 0.8)",
         borderColor: "rgba(59, 130, 246, 1)",
         borderWidth: 1,
@@ -97,7 +101,7 @@ const RegionAnalytics = () => {
         },
         title: {
           display: true,
-          text: "Region",
+          text: "City",
           color: "#e2e8f0",
         },
       },
@@ -121,8 +125,8 @@ const RegionAnalytics = () => {
 
   const handleRefresh = () => {
     refetchLinks();
-    if (selectedShortCode) {
-      refetchRegion();
+    if (activeShortCode) {
+      refetchCity();
     }
   };
 
@@ -137,7 +141,7 @@ const RegionAnalytics = () => {
         <div className="glass-card p-5 sm:p-6">
           <div className="flex flex-wrap justify-between items-center gap-3">
             <div>
-              <h1 className="text-2xl font-serif font-bold text-white">Region Analytics</h1>
+              <h1 className="text-2xl font-serif font-bold text-white">City Analytics</h1>
               <p className="text-slate-300 text-sm mt-1">
                 Analyze visitor distribution per shortened link.
               </p>
@@ -168,7 +172,7 @@ const RegionAnalytics = () => {
               </label>
               <select
                 id="link-selector"
-                value={selectedShortCode}
+                value={activeShortCode}
                 onChange={(event) => {
                   const nextShortCode = event.target.value;
                   console.log("selected shortCode:", nextShortCode);
@@ -194,46 +198,46 @@ const RegionAnalytics = () => {
               </select>
             </div>
 
-            {selectedShortCode && (
+            {activeShortCode && (
               <div className="text-xs text-slate-300 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-                Active: <span className="text-white font-semibold">{selectedShortCode}</span>
+                Active: <span className="text-white font-semibold">{activeShortCode}</span>
               </div>
             )}
           </div>
 
-          {topRegion && (
+          {topCity && (
             <div className="mt-4 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-emerald-200 text-sm font-semibold">
-              Top Region: {topRegion.region} ({topRegion.count} visits)
+              Top City: {topCity.city} ({topCity.count} visits)
             </div>
           )}
         </div>
 
         <div className="glass-card p-5 sm:p-6">
           {isLoading && (
-            <p className="text-slate-200 text-sm">Loading region analytics...</p>
+            <p className="text-slate-200 text-sm">Loading city analytics...</p>
           )}
 
           {isLinksError && !isLoading && (
             <p className="text-rose-300 text-sm">Failed to load links</p>
           )}
 
-          {isRegionError && !isLoading && (
-            <p className="text-rose-300 text-sm">Failed to load region data</p>
+          {isCityError && !isLoading && (
+            <p className="text-rose-300 text-sm">{cityErrorMessage}</p>
           )}
 
-          {!isLoading && !isRegionError && !selectedShortCode && (
+          {!isLoading && !isCityError && !activeShortCode && (
             <p className="text-slate-300 text-sm">No links available for analytics</p>
           )}
 
-          {!isLoading && !isRegionError && selectedShortCode && regionStats.length === 0 && (
+          {!isLoading && !isCityError && activeShortCode && cityStats.length === 0 && (
             <p className="text-slate-300 text-sm">No analytics available for this link</p>
           )}
 
-          {!isLoading && !isRegionError && regionStats.length > 0 && (
+          {!isLoading && !isCityError && cityStats.length > 0 && (
             <div className="space-y-6">
               {selectedDomain && (
                 <p className="text-xs text-slate-300">
-                  Showing analytics for <span className="text-white font-semibold">{selectedShortCode}</span> ({selectedDomain})
+                  Showing analytics for <span className="text-white font-semibold">{activeShortCode}</span> ({selectedDomain})
                 </p>
               )}
 
@@ -245,14 +249,14 @@ const RegionAnalytics = () => {
                 <table className="min-w-full text-sm text-slate-200">
                   <thead className="bg-white/5 text-slate-100">
                     <tr>
-                      <th className="px-4 py-3 text-left font-semibold">Region</th>
+                      <th className="px-4 py-3 text-left font-semibold">City</th>
                       <th className="px-4 py-3 text-left font-semibold">Visits</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {regionStats.map((item) => (
-                      <tr key={`${item.region}-${item.count}`} className="border-t border-white/10">
-                        <td className="px-4 py-3">{item.region}</td>
+                    {cityStats.map((item) => (
+                      <tr key={`${item.city}-${item.count}`} className="border-t border-white/10">
+                        <td className="px-4 py-3">{item.city}</td>
                         <td className="px-4 py-3">{item.count}</td>
                       </tr>
                     ))}
@@ -267,5 +271,7 @@ const RegionAnalytics = () => {
   );
 };
 
-export default RegionAnalytics;
+export default CityAnalytics;
+
+
 

@@ -39,6 +39,7 @@ public class ClickEvent {
     @Column(name = "region", length = 100)
     private String region;
 
+
     @Column(name = "city", length = 100)
     private String city;
 

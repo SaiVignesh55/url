@@ -23,7 +23,7 @@ const Navbar = () => {
     { path: "/scanner", label: "URL Scanner" },
     ...(token
       ? [
-          { path: "/region-analytics", label: "Region Analytics" },
+          { path: "/city-analytics", label: "City Analytics" },
           { path: "/dashboard", label: "Dashboard" },
         ]
       : []),

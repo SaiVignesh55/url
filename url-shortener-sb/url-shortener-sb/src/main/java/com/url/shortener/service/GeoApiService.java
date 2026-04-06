@@ -24,10 +24,10 @@ import java.nio.charset.StandardCharsets;
 @Slf4j
 public class GeoApiService {
 
-    private static final String IPINFO_URL = "https://ipinfo.io/{ip}";
+    private static final String IPAPI_URL = "https://ipapi.co/{ip}/json/";
 
-    @Value("${ipinfo.token:}")
-    private String apiToken;
+    @Value("${ipapi.key:}")
+    private String apiKey;
 
     private final ObjectMapper objectMapper;
     private final RestTemplate restTemplate;
@@ -66,6 +66,27 @@ public class GeoApiService {
         }
     }
 
+    public GeoData getRegionFromIp(String ipAddress) {
+        String normalizedIp = normalizeIp(ipAddress);
+        if (normalizedIp == null || normalizedIp.isBlank()) {
+            log.warn("Region lookup skipped: client IP is missing or invalid");
+            return GeoData.unknown();
+        }
+
+        if (isLoopbackIp(normalizedIp) || isPrivateIp(normalizedIp)) {
+            log.warn("Region lookup skipped: client IP is local/private ip={}", normalizedIp);
+            return new GeoData("Local/Unknown", "Local/Unknown", "Local/Unknown");
+        }
+
+        GeoData geoData = getRegionByIp(normalizedIp);
+        log.info("CLIENT IP GEO: ip={} country={} region={} city={}",
+                normalizedIp,
+                geoData.getCountry(),
+                geoData.getRegion(),
+                geoData.getCity());
+        return geoData;
+    }
+
     public GeoDebugResponse debugRegionFromUrl(String url) {
         GeoDebugResponse debug = new GeoDebugResponse();
         debug.setUrl(url);
@@ -98,21 +119,9 @@ public class GeoApiService {
                 return debug;
             }
 
-            if (apiToken == null || apiToken.isBlank()) {
-                debug.setTokenPresent(false);
-                debug.setFallbackReason("ipinfo token missing");
-                applyUnknown(debug);
-                return debug;
-            }
-
-            debug.setTokenPresent(true);
-            String requestUrl = UriComponentsBuilder
-                    .fromUriString(IPINFO_URL)
-                    .queryParam("token", apiToken)
-                    .buildAndExpand(resolvedIp.trim())
-                    .encode(StandardCharsets.UTF_8)
-                    .toUriString();
-            debug.setIpinfoRequestUrl(requestUrl.replace(apiToken, "XXX"));
+            debug.setTokenPresent(apiKey != null && !apiKey.isBlank());
+            String requestUrl = buildIpApiUri(resolvedIp.trim());
+            debug.setIpapiRequestUrl(apiKey == null || apiKey.isBlank() ? requestUrl : requestUrl.replace(apiKey, "XXX"));
 
             ResponseEntity<String> response = restTemplate.exchange(requestUrl, HttpMethod.GET, null, String.class);
             HttpStatusCode statusCode = response.getStatusCode();
@@ -120,24 +129,24 @@ public class GeoApiService {
             debug.setRawResponse(response.getBody());
 
             if (!statusCode.is2xxSuccessful() || response.getBody() == null || response.getBody().isBlank()) {
-                debug.setFallbackReason("ipinfo response was non-2xx or empty");
+                debug.setFallbackReason("ipapi response was non-2xx or empty");
                 applyUnknown(debug);
                 return debug;
             }
 
             JsonNode root = objectMapper.readTree(response.getBody());
-            debug.setCountry(textOrUnknown(root, "country"));
-            debug.setRegion(textOrUnknown(root, "region"));
+            debug.setCountry(firstTextOrUnknown(root, "country_name", "country", "country_code"));
+            debug.setRegion(firstTextOrUnknown(root, "region", "region_name"));
             debug.setCity(textOrUnknown(root, "city"));
 
             if ("UNKNOWN".equals(debug.getRegion())) {
-                debug.setFallbackReason("region field missing/blank in ipinfo response");
+                debug.setFallbackReason("region field missing/blank in ipapi response");
             }
             if ("UNKNOWN".equals(debug.getCountry()) && debug.getFallbackReason() == null) {
-                debug.setFallbackReason("country field missing/blank in ipinfo response");
+                debug.setFallbackReason("country field missing/blank in ipapi response");
             }
 
-            debug.setSuccess(!"UNKNOWN".equals(debug.getRegion()));
+            debug.setSuccess(!"UNKNOWN".equals(debug.getCountry()));
             return debug;
         } catch (Exception ex) {
             debug.setFallbackReason(ex.getClass().getSimpleName() + ": " + ex.getMessage());
@@ -151,47 +160,65 @@ public class GeoApiService {
             return GeoData.unknown();
         }
 
-        if (apiToken == null || apiToken.isBlank()) {
-            log.warn("ipinfo token is not configured. Returning UNKNOWN for ip={}", ip);
-            return GeoData.unknown();
-        }
-
         try {
-            String requestUrl = UriComponentsBuilder
-                    .fromUriString(IPINFO_URL)
-                    .queryParam("token", apiToken)
-                    .buildAndExpand(ip.trim())
-                    .encode(StandardCharsets.UTF_8)
-                    .toUriString();
+            String requestUrl = buildIpApiUri(ip.trim());
 
-            log.info("IPINFO REQUEST: {}", requestUrl.replace(apiToken, "XXX"));
-            log.info("IPINFO TOKEN PRESENT: {}", apiToken != null && !apiToken.isBlank());
+            log.debug("IPAPI REQUEST: {}", apiKey == null || apiKey.isBlank() ? requestUrl : requestUrl.replace(apiKey, "XXX"));
+            log.debug("IPAPI KEY PRESENT: {}", apiKey != null && !apiKey.isBlank());
 
             ResponseEntity<String> response = restTemplate.exchange(requestUrl, HttpMethod.GET, null, String.class);
             if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null || response.getBody().isBlank()) {
-                log.error("ipinfo response invalid for ip={} status={}", ip, response.getStatusCode());
+                log.error("ipapi response invalid for ip={} status={}", maskIp(ip), response.getStatusCode());
                 return GeoData.unknown();
             }
 
-            log.info("IPINFO RAW RESPONSE: {}", response.getBody());
-
             JsonNode root = objectMapper.readTree(response.getBody());
-            String country = textOrUnknown(root, "country");
-            String region = textOrUnknown(root, "region");
+            String country = firstTextOrUnknown(root, "country_name", "country", "country_code");
+            String region = firstTextOrUnknown(root, "region", "region_name");
             String city = textOrUnknown(root, "city");
 
             if ("UNKNOWN".equals(region)) {
-                log.error("Region missing/null in ipinfo response for ip={}", ip);
+                log.error("Region missing/null in ipapi response for ip={}", maskIp(ip));
             }
             if ("UNKNOWN".equals(country)) {
-                log.error("Country missing/null in ipinfo response for ip={}", ip);
+                log.error("Country missing/null in ipapi response for ip={}", maskIp(ip));
             }
 
             return new GeoData(country, region, city);
         } catch (Exception ex) {
-            log.warn("ipinfo lookup failed for ip={}: {}", ip, ex.getMessage());
+            log.warn("ipapi lookup failed for ip={}: {}", maskIp(ip), ex.getMessage());
             return GeoData.unknown();
         }
+    }
+
+    private String buildIpApiUri(String ip) {
+        String baseUri = UriComponentsBuilder
+                .fromUriString(IPAPI_URL)
+                .buildAndExpand(ip)
+                .encode(StandardCharsets.UTF_8)
+                .toUriString();
+
+        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(baseUri);
+
+        if (apiKey != null && !apiKey.isBlank()) {
+            builder.queryParam("key", apiKey);
+        }
+        return builder.toUriString();
+    }
+
+    private String maskIp(String ip) {
+        if (ip == null || ip.isBlank()) {
+            return "unknown";
+        }
+
+        String normalized = ip.trim();
+        if (normalized.contains(".")) {
+            String[] parts = normalized.split("\\.");
+            if (parts.length == 4) {
+                return parts[0] + "." + parts[1] + ".x.x";
+            }
+        }
+        return "[ipv6]";
     }
 
     private String extractDomain(String url) throws URISyntaxException {
@@ -224,8 +251,96 @@ public class GeoApiService {
         return node.asText();
     }
 
+    private String firstTextOrUnknown(JsonNode root, String... fields) {
+        for (String field : fields) {
+            JsonNode node = root.get(field);
+            if (node != null && !node.isNull() && !node.asText().isBlank()) {
+                return node.asText();
+            }
+        }
+        return "UNKNOWN";
+    }
+
+    private String normalizeIp(String rawIp) {
+        if (rawIp == null || rawIp.isBlank()) {
+            return null;
+        }
+
+        String[] candidates = rawIp.split(",");
+        String fallback = null;
+
+        for (String candidate : candidates) {
+            String normalized = normalizeSingleIp(candidate);
+            if (normalized == null) {
+                continue;
+            }
+
+            if (isLoopbackIp(normalized) || isPrivateIp(normalized)) {
+                if (fallback == null) {
+                    fallback = normalized;
+                }
+                continue;
+            }
+
+            return normalized;
+        }
+
+        return fallback;
+    }
+
+    private String normalizeSingleIp(String rawValue) {
+        if (rawValue == null || rawValue.isBlank()) {
+            return null;
+        }
+
+        String ip = rawValue.trim();
+        if ("unknown".equalsIgnoreCase(ip)) {
+            return null;
+        }
+
+        if (ip.startsWith("[") && ip.contains("]")) {
+            ip = ip.substring(1, ip.indexOf(']'));
+        }
+
+        if (ip.startsWith("::ffff:")) {
+            ip = ip.substring(7);
+        }
+
+        // Handle IPv4 values that include a port (e.g. 203.0.113.10:51234).
+        int colonIndex = ip.lastIndexOf(':');
+        if (colonIndex > 0 && ip.contains(".") && ip.indexOf(':') == colonIndex) {
+            ip = ip.substring(0, colonIndex);
+        }
+
+        return ip;
+    }
+
     private boolean isLoopbackIp(String ip) {
         return ip.startsWith("127.") || "0.0.0.0".equals(ip) || "::1".equals(ip);
+    }
+
+    private boolean isPrivateIp(String ip) {
+        if (!ip.contains(".")) {
+            return false;
+        }
+
+        if (ip.startsWith("10.") || ip.startsWith("192.168.") || ip.startsWith("169.254.")) {
+            return true;
+        }
+
+        if (ip.startsWith("172.")) {
+            String[] parts = ip.split("\\.");
+            if (parts.length > 1) {
+                try {
+                    int secondOctet = Integer.parseInt(parts[1]);
+                    return secondOctet >= 16 && secondOctet <= 31;
+                } catch (NumberFormatException ignored) {
+                    return false;
+                }
+            }
+        }
+
+        return false;
     }
 
     private void applyUnknown(GeoDebugResponse debug) {

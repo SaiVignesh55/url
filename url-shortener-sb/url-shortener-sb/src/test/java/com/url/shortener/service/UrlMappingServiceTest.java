@@ -21,9 +21,12 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import org.mockito.ArgumentCaptor;
 
 class UrlMappingServiceTest {
 
@@ -37,7 +40,7 @@ class UrlMappingServiceTest {
         urlMappingRepository = mock(UrlMappingRepository.class);
         clickEventRepository = mock(ClickEventRepository.class);
         geoApiService = mock(GeoApiService.class);
-        when(geoApiService.getRegionFromUrl(any())).thenReturn(new GeoData("UNKNOWN", "UNKNOWN", "UNKNOWN"));
+        when(geoApiService.getRegionFromIp(any())).thenReturn(new GeoData("UNKNOWN", "UNKNOWN", "UNKNOWN"));
         service = new UrlMappingService(urlMappingRepository, clickEventRepository, geoApiService);
     }
 
@@ -52,6 +55,7 @@ class UrlMappingServiceTest {
         when(urlMappingRepository.findByShortUrl("abc123")).thenReturn(mapping);
         when(urlMappingRepository.save(any(UrlMapping.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(clickEventRepository.save(any(ClickEvent.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(geoApiService.getRegionFromIp("203.0.113.10")).thenReturn(new GeoData("India", "Andhra Pradesh", "Guntur"));
 
         UrlMapping resolved = service.getOriginalUrl("abc123", "203.0.113.10", "Mozilla/5.0");
 
@@ -59,7 +63,13 @@ class UrlMappingServiceTest {
         assertEquals(1, resolved.getClickCount());
 
         verify(urlMappingRepository).save(mapping);
-        verify(clickEventRepository).save(any(ClickEvent.class));
+        ArgumentCaptor<ClickEvent> clickCaptor = ArgumentCaptor.forClass(ClickEvent.class);
+        verify(clickEventRepository, atLeastOnce()).save(clickCaptor.capture());
+
+        ClickEvent savedEvent = clickCaptor.getValue();
+        assertEquals("India", savedEvent.getCountry());
+        assertEquals("Andhra Pradesh", savedEvent.getRegion());
+        assertEquals("Guntur", savedEvent.getCity());
     }
 
     @Test
