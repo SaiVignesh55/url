@@ -4,6 +4,9 @@ import com.url.shortener.dtos.AnalyticsResponseDTO;
 import com.url.shortener.dtos.ClickEventDTO;
 import com.url.shortener.dtos.GeoData;
 import com.url.shortener.dtos.UrlAnalyticsResponseDTO;
+import com.url.shortener.dtos.UrlMappingDTO;
+import com.url.shortener.exception.AliasAlreadyTakenException;
+import com.url.shortener.exception.InvalidAliasException;
 import com.url.shortener.models.ClickEvent;
 import com.url.shortener.models.UrlMapping;
 import com.url.shortener.models.User;
@@ -19,6 +22,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
@@ -42,6 +46,62 @@ class UrlMappingServiceTest {
         geoApiService = mock(GeoApiService.class);
         when(geoApiService.getRegionFromIp(any())).thenReturn(new GeoData("UNKNOWN", "UNKNOWN", "UNKNOWN"));
         service = new UrlMappingService(urlMappingRepository, clickEventRepository, geoApiService);
+    }
+
+    @Test
+    void shouldCreateShortUrlWithCustomAliasWhenValid() {
+        User user = new User();
+        user.setUsername("alice");
+
+        when(urlMappingRepository.existsByShortUrl("my-link")).thenReturn(false);
+        when(urlMappingRepository.save(any(UrlMapping.class))).thenAnswer(invocation -> {
+            UrlMapping persisted = invocation.getArgument(0);
+            persisted.setId(100L);
+            return persisted;
+        });
+
+        UrlMappingDTO result = service.createShortUrl("https://example.com", "my-link", user);
+
+        assertNotNull(result);
+        assertEquals("my-link", result.getShortUrl());
+        assertEquals("https://example.com", result.getOriginalUrl());
+    }
+
+    @Test
+    void shouldRejectReservedCustomAlias() {
+        User user = new User();
+
+        InvalidAliasException ex = assertThrows(
+                InvalidAliasException.class,
+                () -> service.createShortUrl("https://example.com", "admin", user)
+        );
+
+        assertEquals("Alias is reserved and cannot be used", ex.getMessage());
+    }
+
+    @Test
+    void shouldRejectInvalidCustomAliasPattern() {
+        User user = new User();
+
+        InvalidAliasException ex = assertThrows(
+                InvalidAliasException.class,
+                () -> service.createShortUrl("https://example.com", "bad alias", user)
+        );
+
+        assertEquals("Alias can only contain letters, numbers, and hyphens", ex.getMessage());
+    }
+
+    @Test
+    void shouldThrowConflictWhenCustomAliasAlreadyExists() {
+        User user = new User();
+        when(urlMappingRepository.existsByShortUrl("my-link")).thenReturn(true);
+
+        AliasAlreadyTakenException ex = assertThrows(
+                AliasAlreadyTakenException.class,
+                () -> service.createShortUrl("https://example.com", "my-link", user)
+        );
+
+        assertEquals("Alias already taken", ex.getMessage());
     }
 
     @Test

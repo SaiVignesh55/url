@@ -30,7 +30,7 @@ public class CityAnalyticsController {
         return cityAnalyticsService.getGlobalCityStats(user);
     }
 
-    @GetMapping({"/city-stats/{shortCode:[A-Za-z0-9]{8}}", "/country-stats/{shortCode:[A-Za-z0-9]{8}}"})
+    @GetMapping({"/city-stats/{shortCode:[A-Za-z0-9-]{3,30}}", "/country-stats/{shortCode:[A-Za-z0-9-]{3,30}}"})
     @PreAuthorize("hasRole('USER')")
     public List<CityStatsDTO> getCityStatsByShortCode(@PathVariable String shortCode, Principal principal) {
         User user = userService.findByUsername(principal.getName());

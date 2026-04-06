@@ -6,6 +6,9 @@ import com.url.shortener.dtos.ClickEventDTO;
 import com.url.shortener.dtos.GeoData;
 import com.url.shortener.dtos.UrlAnalyticsResponseDTO;
 import com.url.shortener.dtos.UrlMappingDTO;
+import com.url.shortener.exception.AliasAlreadyTakenException;
+import com.url.shortener.exception.InvalidAliasException;
+import com.url.shortener.exception.InvalidUrlException;
 import com.url.shortener.models.ClickEvent;
 import com.url.shortener.models.UrlMapping;
 import com.url.shortener.models.User;
@@ -13,6 +16,7 @@ import com.url.shortener.repository.ClickEventRepository;
 import com.url.shortener.repository.UrlMappingRepository;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,27 +24,76 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Random;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 @Service
 @Slf4j
 @AllArgsConstructor
 public class UrlMappingService {
 
+    private static final Pattern CUSTOM_ALIAS_PATTERN = Pattern.compile("^[a-zA-Z0-9-]+$");
+    private static final int CUSTOM_ALIAS_MIN_LENGTH = 3;
+    private static final int CUSTOM_ALIAS_MAX_LENGTH = 30;
+    private static final int RANDOM_CODE_LENGTH = 8;
+    private static final int RANDOM_CODE_MAX_RETRY = 20;
+    private static final Set<String> RESERVED_ALIASES = new HashSet<>(Arrays.asList("admin", "login", "api", "dashboard"));
+
     private final UrlMappingRepository urlMappingRepository;
     private final ClickEventRepository clickEventRepository;
     private final GeoApiService geoApiService;
 
-    public UrlMappingDTO createShortUrl(String originalUrl, User user) {
-        String shortUrl = generateShortUrl();
+    public UrlMappingDTO createShortUrl(String originalUrl, String customAlias, User user) {
+        String normalizedUrl = normalizeLongUrl(originalUrl);
+        String normalizedAlias = normalizeAlias(customAlias);
+
+        if (normalizedAlias != null) {
+            validateCustomAlias(normalizedAlias);
+            if (urlMappingRepository.existsByShortUrl(normalizedAlias)) {
+                throw new AliasAlreadyTakenException("Alias already taken");
+            }
+            UrlMapping savedUrlMapping = saveWithShortCode(normalizedUrl, normalizedAlias, user, true);
+            return convertToDto(savedUrlMapping);
+        }
+
+        UrlMapping savedUrlMapping = saveWithGeneratedShortCode(normalizedUrl, user);
+        return convertToDto(savedUrlMapping);
+    }
+
+    private UrlMapping saveWithGeneratedShortCode(String normalizedUrl, User user) {
+        for (int attempt = 0; attempt < RANDOM_CODE_MAX_RETRY; attempt++) {
+            String shortUrl = generateShortUrl();
+            if (urlMappingRepository.existsByShortUrl(shortUrl)) {
+                continue;
+            }
+
+            try {
+                return saveWithShortCode(normalizedUrl, shortUrl, user, false);
+            } catch (AliasAlreadyTakenException ignored) {
+                // Retry with another generated code when a race condition happens.
+            }
+        }
+        throw new IllegalStateException("Unable to generate unique short URL");
+    }
+
+    private UrlMapping saveWithShortCode(String normalizedUrl, String shortCode, User user, boolean isCustomAlias) {
         UrlMapping urlMapping = new UrlMapping();
-        urlMapping.setOriginalUrl(originalUrl);
-        urlMapping.setShortUrl(shortUrl);
+        urlMapping.setOriginalUrl(normalizedUrl);
+        urlMapping.setShortUrl(shortCode);
         urlMapping.setUser(user);
         urlMapping.setCreatedDate(LocalDateTime.now());
-        UrlMapping savedUrlMapping = urlMappingRepository.save(urlMapping);
-        return convertToDto(savedUrlMapping);
+
+        try {
+            return urlMappingRepository.save(urlMapping);
+        } catch (DataIntegrityViolationException ex) {
+            String conflictMessage = isCustomAlias ? "Alias already taken" : "Generated short code already exists";
+            throw new AliasAlreadyTakenException(conflictMessage);
+        }
     }
 
     private UrlMappingDTO convertToDto(UrlMapping urlMapping) {
@@ -57,13 +110,39 @@ public class UrlMappingService {
     private String generateShortUrl() {
         String characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
         Random random = new Random();
-        StringBuilder shortUrl = new StringBuilder(8);
+        StringBuilder shortUrl = new StringBuilder(RANDOM_CODE_LENGTH);
 
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < RANDOM_CODE_LENGTH; i++) {
             shortUrl.append(characters.charAt(random.nextInt(characters.length())));
         }
 
         return shortUrl.toString();
+    }
+
+    private String normalizeLongUrl(String originalUrl) {
+        if (originalUrl == null || originalUrl.isBlank()) {
+            throw new InvalidUrlException("longUrl is required");
+        }
+        return originalUrl.trim();
+    }
+
+    private String normalizeAlias(String customAlias) {
+        if (customAlias == null || customAlias.isBlank()) {
+            return null;
+        }
+        return customAlias.trim();
+    }
+
+    private void validateCustomAlias(String alias) {
+        if (alias.length() < CUSTOM_ALIAS_MIN_LENGTH || alias.length() > CUSTOM_ALIAS_MAX_LENGTH) {
+            throw new InvalidAliasException("Alias length must be between 3 and 30 characters");
+        }
+        if (!CUSTOM_ALIAS_PATTERN.matcher(alias).matches()) {
+            throw new InvalidAliasException("Alias can only contain letters, numbers, and hyphens");
+        }
+        if (RESERVED_ALIASES.contains(alias.toLowerCase(Locale.ROOT))) {
+            throw new InvalidAliasException("Alias is reserved and cannot be used");
+        }
     }
 
     public List<UrlMappingDTO> getUrlsByUser(User user) {

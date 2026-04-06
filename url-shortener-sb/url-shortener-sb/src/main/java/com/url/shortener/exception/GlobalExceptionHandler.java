@@ -20,6 +20,16 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
+    @ExceptionHandler(InvalidAliasException.class)
+    public ResponseEntity<Map<String, Object>> handleInvalidAlias(InvalidAliasException ex) {
+        return build(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(AliasAlreadyTakenException.class)
+    public ResponseEntity<Map<String, Object>> handleAliasAlreadyTaken(AliasAlreadyTakenException ex) {
+        return build(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException ex) {
         String message = ex.getBindingResult().getFieldErrors().stream()

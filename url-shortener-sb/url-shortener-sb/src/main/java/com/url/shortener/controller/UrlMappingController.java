@@ -1,6 +1,7 @@
 package com.url.shortener.controller;
 
 import com.url.shortener.dtos.AnalyticsResponseDTO;
+import com.url.shortener.dtos.CreateShortUrlRequest;
 import com.url.shortener.dtos.UrlAnalyticsResponseDTO;
 import com.url.shortener.dtos.UrlMappingDTO;
 import com.url.shortener.models.User;
@@ -8,6 +9,7 @@ import com.url.shortener.service.UrlMappingService;
 import com.url.shortener.service.UserService;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -26,16 +28,15 @@ public class UrlMappingController {
     private UrlMappingService urlMappingService;
     private UserService userService;
 
-    // {"originalUrl":"https://example.com"}
+    // {"longUrl":"https://example.com", "customAlias":"my-link"}
 //    https://abc.com/QN7XOa0a --> https://example.com
 
     @PostMapping("/shorten")
     @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<UrlMappingDTO> createShortUrl(@RequestBody Map<String, String> request,
+    public ResponseEntity<UrlMappingDTO> createShortUrl(@Valid @RequestBody CreateShortUrlRequest request,
                                                         Principal principal){
-        String originalUrl = request.get("originalUrl");
         User user = userService.findByUsername(principal.getName());
-        UrlMappingDTO urlMappingDTO = urlMappingService.createShortUrl(originalUrl, user);
+        UrlMappingDTO urlMappingDTO = urlMappingService.createShortUrl(request.getLongUrl(), request.getCustomAlias(), user);
         return ResponseEntity.ok(urlMappingDTO);
     }
 

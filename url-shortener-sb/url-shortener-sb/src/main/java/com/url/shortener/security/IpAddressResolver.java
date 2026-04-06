@@ -1,6 +1,7 @@
 package com.url.shortener.security;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -15,13 +16,11 @@ public class IpAddressResolver {
 
     private final List<CidrBlock> trustedProxyCidrs;
 
+    @Autowired
     public IpAddressResolver(@Value("${ip.resolver.trusted-proxies:127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,::1/128,fc00::/7,fe80::/10}") String trustedProxyCidrs) {
         this.trustedProxyCidrs = parseCidrs(trustedProxyCidrs);
     }
 
-    IpAddressResolver(List<CidrBlock> trustedProxyCidrs) {
-        this.trustedProxyCidrs = trustedProxyCidrs;
-    }
 
     public String resolveClientIp(HttpServletRequest request) {
         String remoteAddr = normalizeSingleIp(request.getRemoteAddr());

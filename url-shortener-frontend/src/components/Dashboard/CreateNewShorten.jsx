@@ -7,6 +7,10 @@ import { RxCross2 } from 'react-icons/rx';
 import api from '../../api/api';
 import toast from 'react-hot-toast';
 
+const CUSTOM_ALIAS_REGEX = /^[a-zA-Z0-9-]+$/;
+const CUSTOM_ALIAS_MIN_LENGTH = 3;
+const CUSTOM_ALIAS_MAX_LENGTH = 30;
+
 const CreateNewShorten = ({ setOpen, refetch }) => {
     const { token } = useStoreContext();
     const [loading, setLoading] = useState(false);
@@ -16,18 +20,24 @@ const CreateNewShorten = ({ setOpen, refetch }) => {
     register,
     handleSubmit,
     reset,
-    formState: { errors },
+    formState: { errors, isValid },
   } = useForm({
     defaultValues: {
-      originalUrl: "",
+      longUrl: "",
+      customAlias: "",
     },
-    mode: "onTouched",
+    mode: "onChange",
   });
 
   const createShortUrlHandler = async (data) => {
     setLoading(true);
     try {
-        const { data: res } = await api.post("/api/urls/shorten", data, {
+        const payload = {
+          longUrl: data.longUrl,
+          ...(data.customAlias?.trim() ? { customAlias: data.customAlias.trim() } : {}),
+        };
+
+        const { data: res } = await api.post("/api/urls/shorten", payload, {
             headers: {
               "Content-Type": "application/json",
               Accept: "application/json",
@@ -47,8 +57,17 @@ const CreateNewShorten = ({ setOpen, refetch }) => {
           await refetch();
           reset();
           setOpen(false);
-    } catch {
-        toast.error("Create ShortURL Failed");
+    } catch (error) {
+        const status = error?.response?.status;
+        const message = error?.response?.data?.message;
+
+        if (status === 409) {
+          toast.error("Alias already taken");
+        } else if (status === 400 && message) {
+          toast.error(message);
+        } else {
+          toast.error("Create ShortURL Failed");
+        }
     } finally {
         setLoading(false);
     }
@@ -72,18 +91,41 @@ const CreateNewShorten = ({ setOpen, refetch }) => {
           <TextField
             label="Enter URL"
             required
-            id="originalUrl"
+            id="longUrl"
             placeholder="https://example.com"
             type="url"
             message="Url is required"
             register={register}
             errors={errors}
           />
+
+          <TextField
+            label="Custom Alias (optional)"
+            id="customAlias"
+            placeholder="my-link"
+            type="text"
+            register={register}
+            errors={errors}
+            validate={(value) => {
+              const alias = value?.trim();
+              if (!alias) {
+                return true;
+              }
+              if (alias.length < CUSTOM_ALIAS_MIN_LENGTH || alias.length > CUSTOM_ALIAS_MAX_LENGTH) {
+                return "Alias length must be between 3 and 30 characters";
+              }
+              if (!CUSTOM_ALIAS_REGEX.test(alias)) {
+                return "Alias can only contain letters, numbers, and hyphens";
+              }
+              return true;
+            }}
+          />
         </div>
 
         <button
           className="bg-customRed font-semibold text-white w-32  bg-custom-gradient  py-2  transition-colors  rounded-md my-3"
           type="submit"
+          disabled={loading || !isValid}
         >
           {loading ? "Loading..." : "Create"}
         </button>

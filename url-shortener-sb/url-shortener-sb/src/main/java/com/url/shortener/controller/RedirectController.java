@@ -24,7 +24,7 @@ public class RedirectController {
         return trackAndRedirect(code, request);
     }
 
-    @GetMapping("/{code:[A-Za-z0-9]{8}}")
+    @GetMapping("/{code:[A-Za-z0-9-]{3,30}}")
     public ResponseEntity<Void> redirectByShortCode(@PathVariable String code, HttpServletRequest request) {
         return trackAndRedirect(code, request);
     }
