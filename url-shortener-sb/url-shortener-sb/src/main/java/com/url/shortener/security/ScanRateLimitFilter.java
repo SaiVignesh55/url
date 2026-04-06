@@ -4,6 +4,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.core.Authentication;
@@ -20,9 +21,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Component
+@RequiredArgsConstructor
 public class ScanRateLimitFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(ScanRateLimitFilter.class);
+
+    private final IpAddressResolver ipAddressResolver;
 
     @Value("${url.scan.rate-limit.ip-per-minute:60}")
     private int ipPerMinute;
@@ -114,11 +118,7 @@ public class ScanRateLimitFilter extends OncePerRequestFilter {
     }
 
     private String extractIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
+        return ipAddressResolver.resolveClientIp(request);
     }
 
     private void reject(HttpServletResponse response, String message) throws IOException {

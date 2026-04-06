@@ -312,7 +312,24 @@ public class GeoApiService {
             ip = ip.substring(0, colonIndex);
         }
 
+        if (!isValidIpLiteral(ip)) {
+            return null;
+        }
+
         return ip;
+    }
+
+    private boolean isValidIpLiteral(String value) {
+        if (value == null || value.isBlank() || !value.matches("^[0-9a-fA-F:.]+$")) {
+            return false;
+        }
+
+        try {
+            InetAddress.getByName(value);
+            return true;
+        } catch (Exception ex) {
+            return false;
+        }
     }
 
     private boolean isLoopbackIp(String ip) {
@@ -320,6 +337,11 @@ public class GeoApiService {
     }
 
     private boolean isPrivateIp(String ip) {
+        String normalized = ip.toLowerCase();
+        if (normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80:")) {
+            return true;
+        }
+
         if (!ip.contains(".")) {
             return false;
         }

@@ -1,6 +1,7 @@
 package com.url.shortener.controller;
 
 import com.url.shortener.models.UrlMapping;
+import com.url.shortener.security.IpAddressResolver;
 import com.url.shortener.service.UrlMappingService;
 import lombok.AllArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -15,7 +16,8 @@ import java.net.URI;
 @AllArgsConstructor
 public class RedirectController {
 
-    private UrlMappingService urlMappingService;
+    private final UrlMappingService urlMappingService;
+    private final IpAddressResolver ipAddressResolver;
 
     @GetMapping("/r/{code}")
     public ResponseEntity<Void> redirect(@PathVariable String code, HttpServletRequest request){
@@ -28,7 +30,7 @@ public class RedirectController {
     }
 
     private ResponseEntity<Void> trackAndRedirect(String code, HttpServletRequest request) {
-        String ipAddress = extractClientIp(request);
+        String ipAddress = ipAddressResolver.resolveClientIp(request);
         String userAgent = request.getHeader("User-Agent");
 
         UrlMapping urlMapping = urlMappingService.getOriginalUrl(code, ipAddress, userAgent);
@@ -39,47 +41,5 @@ public class RedirectController {
         }
 
         return ResponseEntity.notFound().build();
-    }
-
-    private String extractClientIp(HttpServletRequest request) {
-        String[] headerNames = {
-                "X-Forwarded-For",
-                "X-Real-IP",
-                "Forwarded"
-        };
-
-        for (String headerName : headerNames) {
-            String headerValue = request.getHeader(headerName);
-            if (headerValue != null && !headerValue.isBlank()) {
-                String candidate = extractFirstIpToken(headerValue);
-                if (candidate != null) {
-                    return candidate;
-                }
-            }
-        }
-
-        String remoteAddr = request.getRemoteAddr();
-        return (remoteAddr == null || remoteAddr.isBlank()) ? null : remoteAddr.trim();
-    }
-
-    private String extractFirstIpToken(String headerValue) {
-        String[] parts = headerValue.split(",");
-        for (String part : parts) {
-            String candidate = part.trim();
-            if (candidate.startsWith("for=")) {
-                candidate = candidate.substring(4).trim();
-            }
-            int semicolonIndex = candidate.indexOf(';');
-            if (semicolonIndex > 0) {
-                candidate = candidate.substring(0, semicolonIndex).trim();
-            }
-            if (candidate.startsWith("\"") && candidate.endsWith("\"") && candidate.length() > 1) {
-                candidate = candidate.substring(1, candidate.length() - 1);
-            }
-            if (!candidate.isBlank() && !"unknown".equalsIgnoreCase(candidate)) {
-                return candidate;
-            }
-        }
-        return null;
     }
 }
