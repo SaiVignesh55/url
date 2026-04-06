@@ -1,19 +1,8 @@
 import React, { useMemo, useState } from "react";
 import { motion as Motion } from "framer-motion";
-import { Bar } from "react-chartjs-2";
-import {
-  Chart as ChartJS,
-  BarElement,
-  CategoryScale,
-  LinearScale,
-  Legend,
-  Tooltip,
-} from "chart.js";
 import { useNavigate } from "react-router-dom";
 import { useStoreContext } from "../contextApi/ContextApi";
 import { useFetchCityStatsByShortCode, useFetchMyLinks } from "../hooks/useQuery";
-
-ChartJS.register(BarElement, CategoryScale, LinearScale, Legend, Tooltip);
 
 const CityAnalytics = () => {
   const navigate = useNavigate();
@@ -67,61 +56,17 @@ const CityAnalytics = () => {
     }
   }, [selectedLink]);
 
-  const chartData = {
-    labels: cityStats.map((item) => item.city),
-    datasets: [
-      {
-        label: "Visits",
-        data: cityStats.map((item) => item.count),
-        backgroundColor: "rgba(96, 165, 250, 0.8)",
-        borderColor: "rgba(59, 130, 246, 1)",
-        borderWidth: 1,
-        borderRadius: 6,
-      },
-    ],
-  };
+  const maxVisits = useMemo(() => {
+    if (!Array.isArray(cityStats) || cityStats.length === 0) {
+      return 0;
+    }
+    return Math.max(...cityStats.map((item) => Number(item?.count || 0)), 0);
+  }, [cityStats]);
 
-  const chartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        labels: {
-          color: "#e2e8f0",
-        },
-      },
-    },
-    scales: {
-      x: {
-        ticks: {
-          color: "#cbd5e1",
-        },
-        grid: {
-          color: "rgba(148, 163, 184, 0.15)",
-        },
-        title: {
-          display: true,
-          text: "City",
-          color: "#e2e8f0",
-        },
-      },
-      y: {
-        beginAtZero: true,
-        ticks: {
-          precision: 0,
-          color: "#cbd5e1",
-        },
-        grid: {
-          color: "rgba(148, 163, 184, 0.15)",
-        },
-        title: {
-          display: true,
-          text: "Visits",
-          color: "#e2e8f0",
-        },
-      },
-    },
-  };
+  const allZeroVisits = useMemo(
+    () => Array.isArray(cityStats) && cityStats.length > 0 && cityStats.every((item) => Number(item?.count || 0) === 0),
+    [cityStats]
+  );
 
   const handleRefresh = () => {
     refetchLinks();
@@ -175,7 +120,6 @@ const CityAnalytics = () => {
                 value={activeShortCode}
                 onChange={(event) => {
                   const nextShortCode = event.target.value;
-                  console.log("selected shortCode:", nextShortCode);
                   setSelectedShortCode(nextShortCode);
                 }}
                 className="w-full rounded-xl border border-white/15 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-blue-400"
@@ -242,7 +186,34 @@ const CityAnalytics = () => {
               )}
 
               <div className="h-[320px]">
-                <Bar data={chartData} options={chartOptions} />
+                <div className="h-full w-full rounded-xl bg-slate-900/70 border border-white/10 p-4 sm:p-5">
+                  {allZeroVisits && (
+                    <p className="text-sm text-slate-300 mb-3">No visits yet</p>
+                  )}
+                  <div className="h-full w-full flex items-end justify-between gap-2 sm:gap-3">
+                    {cityStats.map((item) => {
+                      const visits = Number(item?.count || 0);
+                      const ratio = maxVisits === 0 ? 0 : visits / maxVisits;
+                      const normalizedHeight = maxVisits === 0 ? "5px" : `${Math.max(ratio * 100, 8)}%`;
+
+                      return (
+                        <div key={`${item.city}-${item.count}`} className="flex-1 min-w-0 flex flex-col items-center gap-2">
+                          <span className="text-xs text-slate-300">{visits}</span>
+                          <div className="w-full h-[220px] flex items-end">
+                            <div
+                              className="w-full rounded-md bg-indigo-500 transition-all duration-700 ease-out"
+                              style={{ height: normalizedHeight }}
+                              title={`${item.city}: ${visits} visits`}
+                            />
+                          </div>
+                          <span className="text-[11px] text-slate-400 truncate w-full text-center" title={item.city}>
+                            {item.city}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
 
               <div className="overflow-x-auto rounded-xl border border-white/10">
