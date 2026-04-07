@@ -49,6 +49,7 @@ public class UrlMappingService {
     private final ClickEventRepository clickEventRepository;
     private final GeoApiService geoApiService;
 
+    @Transactional
     public UrlMappingDTO createShortUrl(String originalUrl, String customAlias, User user) {
         String normalizedUrl = normalizeLongUrl(originalUrl);
         String normalizedAlias = normalizeAlias(customAlias);
@@ -146,16 +147,19 @@ public class UrlMappingService {
         }
     }
 
+    @Transactional(readOnly = true)
     public List<UrlMappingDTO> getUrlsByUser(User user) {
         return urlMappingRepository.findByUser(user).stream()
                 .map(this::convertToDto)
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public Optional<UrlMapping> getUrlByShortCodeForUser(String shortCode, User user) {
         return urlMappingRepository.findByShortUrlAndUser(shortCode, user);
     }
 
+    @Transactional(readOnly = true)
     public List<ClickEventDTO> getClickEventsByDate(String shortUrl, LocalDate startDate, LocalDate endDate) {
         UrlMapping urlMapping = urlMappingRepository.findByShortUrl(shortUrl);
         if (urlMapping == null) {
@@ -171,6 +175,7 @@ public class UrlMappingService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public UrlAnalyticsResponseDTO getUrlAnalyticsByShortCode(String shortCode, LocalDate startDate, LocalDate endDate) {
         try {
             log.info("Analytics request received shortCode={} startDate={} endDate={}", shortCode, startDate, endDate);
@@ -221,6 +226,7 @@ public class UrlMappingService {
         }
     }
 
+    @Transactional(readOnly = true)
     public AnalyticsResponseDTO getTotalClicksByUserAndDate(User user, LocalDate start, LocalDate end) {
         LocalDateTime rangeStart = start.atStartOfDay();
         LocalDateTime rangeEndExclusive = end.plusDays(1).atStartOfDay();
