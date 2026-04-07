@@ -14,7 +14,7 @@ const CUSTOM_ALIAS_MAX_LENGTH = 30;
 const CreateNewShorten = ({ setOpen, refetch }) => {
     const { token } = useStoreContext();
     const [loading, setLoading] = useState(false);
-    const backendBaseUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:9000";
+    const backendBaseUrl = (import.meta.env.VITE_BACKEND_URL || "").trim();
 
   const {
     register,
@@ -45,7 +45,7 @@ const CreateNewShorten = ({ setOpen, refetch }) => {
             },
           });
 
-          const shortenUrl = `${backendBaseUrl}/r/${res.shortUrl}`;
+          const shortenUrl = backendBaseUrl ? `${backendBaseUrl}/r/${res.shortUrl}` : `/r/${res.shortUrl}`;
           navigator.clipboard.writeText(shortenUrl).then(() => {
             toast.success("Short URL Copied to Clipboard", {
                 position: "bottom-center",

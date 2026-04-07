@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: url-shortener-backend
+    env: java
+    rootDir: url-shortener-sb/url-shortener-sb
+    buildCommand: ./mvnw clean install
+    startCommand: java -jar target/*.jar
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_USERNAME
+        sync: false
+      - key: DATABASE_PASSWORD
+        sync: false
+      - key: APP_BASE_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: GOOGLE_SAFE_BROWSING_API_KEY
+        sync: false
+      - key: VIRUSTOTAL_API_KEY
+        sync: false
+      - key: URLSCAN_API_KEY
+        sync: false
+      - key: IPAPI_KEY
+        sync: false
+
+  - type: web
+    name: url-shortener-frontend
+    env: static
+    rootDir: url-shortener-frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_BACKEND_URL
+        sync: false
+      - key: VITE_REACT_FRONT_END_URL
+        sync: false
+

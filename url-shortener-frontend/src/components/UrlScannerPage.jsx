@@ -22,7 +22,8 @@ const UrlScannerPage = () => {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [copied, setCopied] = useState(false);
   const [copiedFinal, setCopiedFinal] = useState(false);
-  const backendBaseUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:9000";
+  const backendBaseUrl = (import.meta.env.VITE_BACKEND_URL || "").trim();
+  const frontendBaseUrl = (import.meta.env.VITE_REACT_FRONT_END_URL || window.location.origin || "").trim();
 
   const pollIntervalRef = useRef(null);
   const elapsedTimerRef = useRef(null);
@@ -245,9 +246,12 @@ const UrlScannerPage = () => {
     }
 
     // Keep legacy /s links scannable by forcing backend HTTP redirect endpoint.
-    const legacyPrefix = `${import.meta.env.VITE_REACT_FRONT_END_URL || "http://localhost:5173"}/s/`;
+    const legacyPrefix = `${frontendBaseUrl}/s/`;
     if (trimmed.startsWith(legacyPrefix)) {
-      return trimmed.replace("/s/", "/r/").replace(import.meta.env.VITE_REACT_FRONT_END_URL || "http://localhost:5173", backendBaseUrl);
+      if (!backendBaseUrl) {
+        return trimmed.replace("/s/", "/r/");
+      }
+      return trimmed.replace("/s/", "/r/").replace(frontendBaseUrl, backendBaseUrl);
     }
     return trimmed;
   };
@@ -339,7 +343,7 @@ const UrlScannerPage = () => {
               type="url"
               value={url}
               onChange={(event) => setUrl(event.target.value)}
-              placeholder="http://localhost:9000/r/abc123 or https://example.com"
+              placeholder="https://your-api-domain/r/abc123 or https://example.com"
               className="px-3 py-2.5 border border-white/20 outline-none bg-slate-900/40 text-slate-100 rounded-xl placeholder:text-slate-400"
             />
           </div>

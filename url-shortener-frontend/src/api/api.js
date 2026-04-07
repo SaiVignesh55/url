@@ -1,7 +1,9 @@
 import axios from "axios";
 
+const backendBaseUrl = (import.meta.env.VITE_BACKEND_URL || "").trim();
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_BACKEND_URL,
+  baseURL: backendBaseUrl || undefined,
 });
 
 export const scannerApi = {

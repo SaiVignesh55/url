@@ -23,9 +23,9 @@ const ShortenItem = ({ originalUrl, shortUrl, clickCount, createdDate }) => {
     const [showQrCode, setShowQrCode] = useState(false);
     const [qrLoading, setQrLoading] = useState(false);
     const [qrPayload, setQrPayload] = useState(null);
-    const backendBaseUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:9000";
+    const backendBaseUrl = (import.meta.env.VITE_BACKEND_URL || "").trim();
 
-    const subDomain = backendBaseUrl.replace(
+    const subDomain = (backendBaseUrl || window.location.origin).replace(
         /^https?:\/\//,
         ""
       );
@@ -125,7 +125,7 @@ const ShortenItem = ({ originalUrl, shortUrl, clickCount, createdDate }) => {
             <Link
               target='_'
               className='text-[17px]  font-montserrat font-[600] text-blue-300'
-              to={`${backendBaseUrl}/r/${shortUrl}`}>
+              to={`${backendBaseUrl || ""}/r/${shortUrl}`}>
                   {`${subDomain}/r/${shortUrl}`}
             </Link>
             <FaExternalLinkAlt className="text-blue-300" />
@@ -162,7 +162,7 @@ const ShortenItem = ({ originalUrl, shortUrl, clickCount, createdDate }) => {
         <div className="flex  flex-1  sm:justify-end items-center gap-4">
             <CopyToClipboard
                 onCopy={() => setIsCopied(true)}
-                text={`${backendBaseUrl}/r/${shortUrl}`}
+                text={`${backendBaseUrl || ""}/r/${shortUrl}`}
             >
                 <div className="flex cursor-pointer gap-1 items-center btn-gradient py-2 font-semibold px-6 rounded-xl text-white ">
                 <button className="">{isCopied ? "Copied" : "Copy"}</button>

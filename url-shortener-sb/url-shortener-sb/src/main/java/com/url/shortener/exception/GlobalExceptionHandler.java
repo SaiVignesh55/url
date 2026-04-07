@@ -2,6 +2,9 @@ package com.url.shortener.exception;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.dao.DataAccessException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -14,6 +17,7 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(InvalidUrlException.class)
     public ResponseEntity<Map<String, Object>> handleInvalidUrl(InvalidUrlException ex) {
@@ -47,6 +51,12 @@ public class GlobalExceptionHandler {
         }
         String message = ex.getReason() == null ? "Request failed" : ex.getReason();
         return build(status, message);
+    }
+
+    @ExceptionHandler(DataAccessException.class)
+    public ResponseEntity<Map<String, Object>> handleDataAccess(DataAccessException ex) {
+        log.error("Database operation failed: {}", ex.getMessage(), ex);
+        return build(HttpStatus.SERVICE_UNAVAILABLE, "Database temporarily unavailable. Please try again.");
     }
 
     @ExceptionHandler(Exception.class)

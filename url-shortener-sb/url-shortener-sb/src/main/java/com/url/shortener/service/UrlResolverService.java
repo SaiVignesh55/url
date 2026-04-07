@@ -35,7 +35,7 @@ public class UrlResolverService {
     @Value("${url.scan.internal-hosts:localhost,127.0.0.1}")
     private String internalHostsCsv;
 
-    @Value("${app.base-url:}")
+    @Value("${app.base-url:http://localhost:9001}")
     private String appBaseUrl;
 
     private final RestTemplate scannerRestTemplate;
@@ -53,14 +53,12 @@ public class UrlResolverService {
 
         if (isInternalShortUrl(normalizedInput)) {
             log.info("Detected internal short URL. Bypassing HTTP resolver for input={}", normalizedInput);
-            System.out.println("Resolver detection type=internal input=" + normalizedInput);
             String resolvedInternalUrl = resolveInternalUrl(normalizedInput);
             log.info("Resolved URL via DB input={} final={}", normalizedInput, resolvedInternalUrl);
             return new ResolvedResult(resolvedInternalUrl, List.of(normalizedInput, resolvedInternalUrl), false, false);
         }
 
         log.info("Resolved URL path type=external-http input={}", normalizedInput);
-        System.out.println("Resolver detection type=external input=" + normalizedInput);
         List<String> chain = new ArrayList<>();
         Set<String> visited = new LinkedHashSet<>();
         chain.add(current.toString());
@@ -118,7 +116,6 @@ public class UrlResolverService {
         UrlNormalizationService.NormalizedUrl target = urlNormalizationService.normalizeAndValidate(mapping.getOriginalUrl());
         String resolved = target.normalizedUrl();
         log.info("Resolved URL via DB code={} final={}", code, resolved);
-        System.out.println("Internal short URL resolved from DB code=" + code + " final=" + resolved);
         return resolved;
     }
 

@@ -31,7 +31,6 @@ public class UrlScannerController {
     public ResponseEntity<UrlScanAsyncSubmitResponse> scanUrl(@Valid @RequestBody UrlScanRequest request) {
         String requestedUrl = request.getUrl().trim();
         log.info("Received scan request for url={}", requestedUrl);
-        System.out.println("SCAN REQUEST RECEIVED: " + requestedUrl);
 
         String scanId = urlScannerService.submitAsyncScan(requestedUrl);
         UrlScanAsyncSubmitResponse response = new UrlScanAsyncSubmitResponse(scanId, "IN_PROGRESS");
