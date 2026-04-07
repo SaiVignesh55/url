@@ -1,10 +1,9 @@
 services:
   - type: web
     name: url-shortener-backend
-    env: java
+    env: docker
     rootDir: url-shortener-sb/url-shortener-sb
-    buildCommand: ./mvnw clean install
-    startCommand: java -jar target/*.jar
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: DATABASE_URL
         sync: false
