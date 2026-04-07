@@ -118,7 +118,7 @@ public class ScanRateLimitFilter extends OncePerRequestFilter {
     }
 
     private String extractIp(HttpServletRequest request) {
-        return ipAddressResolver.resolveClientIp(request);
+        return ipAddressResolver.getClientIp(request);
     }
 
     private void reject(HttpServletResponse response, String message) throws IOException {

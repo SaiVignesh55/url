@@ -1,6 +1,8 @@
 package com.url.shortener.security;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -14,6 +16,8 @@ import java.util.List;
 @Component
 public class IpAddressResolver {
 
+    private static final Logger log = LoggerFactory.getLogger(IpAddressResolver.class);
+
     private final List<CidrBlock> trustedProxyCidrs;
 
     @Autowired
@@ -22,28 +26,24 @@ public class IpAddressResolver {
     }
 
 
-    public String resolveClientIp(HttpServletRequest request) {
-        String remoteAddr = normalizeSingleIp(request.getRemoteAddr());
-        boolean trustForwardedHeaders = shouldTrustForwardedHeaders(remoteAddr);
+    public String getClientIp(HttpServletRequest request) {
+        String ip = request.getHeader("X-Forwarded-For");
 
-        if (trustForwardedHeaders) {
-            String xForwardedForIp = firstPublicIp(request.getHeader("X-Forwarded-For"));
-            if (xForwardedForIp != null) {
-                return xForwardedForIp;
-            }
-
-            String xRealIp = firstPublicIp(request.getHeader("X-Real-IP"));
-            if (xRealIp != null) {
-                return xRealIp;
-            }
-
-            String forwardedIp = firstPublicIp(request.getHeader("Forwarded"));
-            if (forwardedIp != null) {
-                return forwardedIp;
-            }
+        if (ip == null || ip.isEmpty() || ip.equalsIgnoreCase("unknown")) {
+            ip = request.getRemoteAddr();
         }
 
-        return remoteAddr;
+        if (ip != null && ip.contains(",")) {
+            ip = ip.split(",")[0].trim();
+        }
+
+        System.out.println("Client IP: " + ip);
+        log.debug("Client IP extracted: {}", ip);
+        return ip;
+    }
+
+    public String resolveClientIp(HttpServletRequest request) {
+        return getClientIp(request);
     }
 
     private String firstPublicIp(String headerValue) {

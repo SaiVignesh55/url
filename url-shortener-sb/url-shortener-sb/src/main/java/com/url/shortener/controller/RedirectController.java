@@ -30,7 +30,7 @@ public class RedirectController {
     }
 
     private ResponseEntity<Void> trackAndRedirect(String code, HttpServletRequest request) {
-        String ipAddress = ipAddressResolver.resolveClientIp(request);
+        String ipAddress = ipAddressResolver.getClientIp(request);
         String userAgent = request.getHeader("User-Agent");
 
         UrlMapping urlMapping = urlMappingService.getOriginalUrl(code, ipAddress, userAgent);
