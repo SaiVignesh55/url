@@ -35,7 +35,7 @@ public class UrlResolverService {
     @Value("${url.scan.internal-hosts:localhost,127.0.0.1}")
     private String internalHostsCsv;
 
-    @Value("${app.base-url:http://localhost:9001}")
+    @Value("${app.base-url:}")
     private String appBaseUrl;
 
     private final RestTemplate scannerRestTemplate;
@@ -161,11 +161,19 @@ public class UrlResolverService {
                     .toList());
         }
 
-        String appHost = extractHost(appBaseUrl);
+        String appHost = extractHost(resolveBaseUrl());
         if (!appHost.isBlank()) {
             hosts.add(appHost.toLowerCase(Locale.ROOT));
         }
         return hosts;
+    }
+
+    private String resolveBaseUrl() {
+        String baseUrl = System.getenv("APP_BASE_URL");
+        if (baseUrl == null || baseUrl.isEmpty()) {
+            baseUrl = (appBaseUrl == null || appBaseUrl.isBlank()) ? "http://localhost:8080" : appBaseUrl;
+        }
+        return baseUrl;
     }
 
     private String extractHost(String baseUrl) {

@@ -60,10 +60,12 @@ public class UrlMappingService {
                 throw new AliasAlreadyTakenException("Alias already taken");
             }
             UrlMapping savedUrlMapping = saveWithShortCode(normalizedUrl, normalizedAlias, user, true);
+            logGeneratedShortUrl(savedUrlMapping.getShortUrl());
             return convertToDto(savedUrlMapping);
         }
 
         UrlMapping savedUrlMapping = saveWithGeneratedShortCode(normalizedUrl, user);
+        logGeneratedShortUrl(savedUrlMapping.getShortUrl());
         return convertToDto(savedUrlMapping);
     }
 
@@ -300,5 +302,16 @@ public class UrlMappingService {
             return null;
         }
         return value.length() <= maxLength ? value : value.substring(0, maxLength);
+    }
+
+    private void logGeneratedShortUrl(String slug) {
+        String baseUrl = System.getenv("APP_BASE_URL");
+        if (baseUrl == null || baseUrl.isEmpty()) {
+            baseUrl = "http://localhost:8080";
+        }
+
+        String normalizedBase = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        String shortUrl = normalizedBase + "/r/" + slug;
+        System.out.println("Generated URL: " + shortUrl);
     }
 }

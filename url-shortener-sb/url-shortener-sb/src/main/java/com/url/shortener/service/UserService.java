@@ -1,11 +1,13 @@
 package com.url.shortener.service;
 
 import com.url.shortener.dtos.LoginRequest;
+import com.url.shortener.dtos.UserProfileResponse;
 import com.url.shortener.models.User;
 import com.url.shortener.repository.UserRepository;
 import com.url.shortener.security.jwt.JwtAuthenticationResponse;
 import com.url.shortener.security.jwt.JwtUtils;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -19,6 +21,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 @AllArgsConstructor
+@Slf4j
 public class UserService {
     private PasswordEncoder passwordEncoder;
     private UserRepository userRepository;
@@ -79,5 +82,19 @@ public class UserService {
         return userRepository.findByUsername(name).orElseThrow(
                 () -> new UsernameNotFoundException("User not found with username: " + name)
         );
+    }
+
+    public UserProfileResponse getUserProfile(String loginId) {
+        if (loginId == null || loginId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User is not authenticated");
+        }
+
+        String normalizedLoginId = loginId.trim();
+        User user = userRepository.findByUsername(normalizedLoginId)
+                .or(() -> userRepository.findByEmail(normalizedLoginId.toLowerCase()))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        log.info("Fetching profile for username={} email={}", user.getUsername(), user.getEmail());
+        return new UserProfileResponse(user.getUsername(), user.getEmail());
     }
 }

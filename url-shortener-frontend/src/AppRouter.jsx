@@ -13,6 +13,7 @@ import PrivateRoute from "./PrivateRoute";
 import ErrorPage from "./components/ErrorPage";
 import UrlScannerPage from "./components/UrlScannerPage";
 import CityAnalytics from "./components/CityAnalytics";
+import Profile from "./pages/Profile";
 
 const AmbientBackground3D = lazy(() => import("./components/AmbientBackground3D"));
 
@@ -43,6 +44,7 @@ const AppRouter = () => {
           <Route path="/login" element={<PrivateRoute publicPage={true}><LoginPage /></PrivateRoute>} />
           
           <Route path="/dashboard" element={ <PrivateRoute publicPage={false}><DashboardLayout /></PrivateRoute>} />
+          <Route path="/profile" element={ <PrivateRoute publicPage={false}><Profile /></PrivateRoute>} />
           <Route path="/city-analytics" element={ <PrivateRoute publicPage={false}><CityAnalytics /></PrivateRoute>} />
           <Route path="/country-analytics" element={ <PrivateRoute publicPage={false}><CityAnalytics /></PrivateRoute>} />
           <Route path="/error" element={ <ErrorPage />} />

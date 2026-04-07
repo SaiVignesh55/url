@@ -23,6 +23,7 @@ const Navbar = () => {
     { path: "/scanner", label: "URL Scanner" },
     ...(token
       ? [
+          { path: "/profile", label: "Profile" },
           { path: "/city-analytics", label: "City Analytics" },
           { path: "/dashboard", label: "Dashboard" },
         ]

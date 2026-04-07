@@ -14,7 +14,6 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.test.context.support.WithMockUser;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -30,7 +29,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(controllers = QrCodeController.class)
 @AutoConfigureMockMvc(addFilters = false)
-@TestPropertySource(properties = "app.base-url=http://localhost:9001")
 class QrCodeControllerTest {
 
     @Autowired
@@ -72,12 +70,12 @@ class QrCodeControllerTest {
         String encoded = Base64.getEncoder().encodeToString("png".getBytes());
 
         when(urlMappingService.getUrlByShortCodeForUser(eq("my-link"), any(User.class))).thenReturn(Optional.of(mapping));
-        when(qrCodeService.generateQRCodeBase64("http://localhost:9001/r/my-link")).thenReturn(encoded);
+        when(qrCodeService.generateQRCodeBase64("http://localhost:8080/r/my-link")).thenReturn(encoded);
 
         mockMvc.perform(get("/api/qr/my-link").principal(() -> "tester"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.shortCode").value("my-link"))
-                .andExpect(jsonPath("$.shortUrl").value("http://localhost:9001/r/my-link"))
+                .andExpect(jsonPath("$.shortUrl").value("http://localhost:8080/r/my-link"))
                 .andExpect(jsonPath("$.mimeType").value("image/png"))
                 .andExpect(jsonPath("$.base64Png").value(encoded));
     }

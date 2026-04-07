@@ -7,7 +7,6 @@ import com.url.shortener.service.QrCodeService;
 import com.url.shortener.service.UrlMappingService;
 import com.url.shortener.service.UserService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,9 +28,6 @@ public class QrCodeController {
     private final UserService userService;
     private final QrCodeService qrCodeService;
 
-    @Value("${app.base-url:http://localhost:9001}")
-    private String appBaseUrl;
-
     @GetMapping("/{shortCode}")
     @PreAuthorize("hasRole('USER')")
     public ResponseEntity<QrCodeResponseDTO> getQrCode(@PathVariable String shortCode, Principal principal) {
@@ -52,8 +48,15 @@ public class QrCodeController {
     }
 
     private String buildShortUrl(String shortCode) {
-        String normalizedBase = appBaseUrl.endsWith("/") ? appBaseUrl.substring(0, appBaseUrl.length() - 1) : appBaseUrl;
-        return normalizedBase + "/r/" + shortCode;
+        String baseUrl = System.getenv("APP_BASE_URL");
+        if (baseUrl == null || baseUrl.isEmpty()) {
+            baseUrl = "http://localhost:8080";
+        }
+
+        String normalizedBase = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        String shortUrl = normalizedBase + "/r/" + shortCode;
+        System.out.println("Generated URL: " + shortUrl);
+        return shortUrl;
     }
 }
 
