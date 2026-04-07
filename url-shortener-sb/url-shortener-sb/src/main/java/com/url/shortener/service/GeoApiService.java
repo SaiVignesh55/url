@@ -73,14 +73,15 @@ public class GeoApiService {
             return GeoData.unknown();
         }
 
-        if (isLoopbackIp(normalizedIp) || isPrivateIp(normalizedIp)) {
-            log.warn("Region lookup skipped: client IP is local/private ip={}", normalizedIp);
-            return new GeoData("Local/Unknown", "Local/Unknown", "Local/Unknown");
+        String ipForLookup = normalizedIp;
+        if (isLoopbackIp(ipForLookup) || isPrivateIP(ipForLookup)) {
+            log.warn("Client IP is local/private. Using fallback public IP for ipapi lookup. originalIp={} fallbackIp=8.8.8.8", normalizedIp);
+            ipForLookup = "8.8.8.8";
         }
 
-        GeoData geoData = getRegionByIp(normalizedIp);
+        GeoData geoData = getRegionByIp(ipForLookup);
         log.info("CLIENT IP GEO: ip={} country={} region={} city={}",
-                normalizedIp,
+                ipForLookup,
                 geoData.getCountry(),
                 geoData.getRegion(),
                 geoData.getCity());
@@ -161,27 +162,38 @@ public class GeoApiService {
         }
 
         try {
-            String requestUrl = buildIpApiUri(ip.trim());
+            String safeIp = ip.trim();
+            if (isPrivateIP(safeIp)) {
+                safeIp = "8.8.8.8";
+            }
 
-            log.debug("IPAPI REQUEST: {}", apiKey == null || apiKey.isBlank() ? requestUrl : requestUrl.replace(apiKey, "XXX"));
-            log.debug("IPAPI KEY PRESENT: {}", apiKey != null && !apiKey.isBlank());
+            String url = "https://ipapi.co/" + safeIp + "/json/";
+            String response = restTemplate.getForObject(url, String.class);
 
-            ResponseEntity<String> response = restTemplate.exchange(requestUrl, HttpMethod.GET, null, String.class);
-            if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null || response.getBody().isBlank()) {
-                log.error("ipapi response invalid for ip={} status={}", maskIp(ip), response.getStatusCode());
+            System.out.println("IP USED: " + safeIp);
+            System.out.println("IPAPI RESPONSE: " + response);
+
+            if (response == null || response.isBlank()) {
+                log.error("ipapi response invalid for ip={}", maskIp(safeIp));
                 return GeoData.unknown();
             }
 
-            JsonNode root = objectMapper.readTree(response.getBody());
+            JsonNode root = objectMapper.readTree(response);
             String country = firstTextOrUnknown(root, "country_name", "country", "country_code");
             String region = firstTextOrUnknown(root, "region", "region_name");
-            String city = textOrUnknown(root, "city");
+            String city = root.has("city") && !root.get("city").isNull()
+                    ? root.get("city").asText()
+                    : "UNKNOWN";
+
+            if (city == null || city.isBlank()) {
+                city = "UNKNOWN";
+            }
 
             if ("UNKNOWN".equals(region)) {
-                log.error("Region missing/null in ipapi response for ip={}", maskIp(ip));
+                log.error("Region missing/null in ipapi response for ip={}", maskIp(safeIp));
             }
             if ("UNKNOWN".equals(country)) {
-                log.error("Country missing/null in ipapi response for ip={}", maskIp(ip));
+                log.error("Country missing/null in ipapi response for ip={}", maskIp(safeIp));
             }
 
             return new GeoData(country, region, city);
@@ -337,33 +349,22 @@ public class GeoApiService {
     }
 
     private boolean isPrivateIp(String ip) {
-        String normalized = ip.toLowerCase();
-        if (normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80:")) {
-            return true;
-        }
+        return isPrivateIP(ip);
+    }
 
-        if (!ip.contains(".")) {
+    private boolean isPrivateIP(String ip) {
+        if (ip == null || ip.isBlank()) {
             return false;
         }
 
-        if (ip.startsWith("10.") || ip.startsWith("192.168.") || ip.startsWith("169.254.")) {
-            return true;
-        }
-
-        if (ip.startsWith("172.")) {
-            String[] parts = ip.split("\\.");
-            if (parts.length > 1) {
-                try {
-                    int secondOctet = Integer.parseInt(parts[1]);
-                    return secondOctet >= 16 && secondOctet <= 31;
-                } catch (NumberFormatException ignored) {
-                    return false;
-                }
-            }
-        }
-
-        return false;
+        return ip.startsWith("127.")
+                || ip.startsWith("10.")
+                || ip.startsWith("192.168.")
+                || ip.startsWith("172.16.")
+                || "localhost".equalsIgnoreCase(ip)
+                || "::1".equals(ip);
     }
+
 
     private void applyUnknown(GeoDebugResponse debug) {
         debug.setCountry("UNKNOWN");
