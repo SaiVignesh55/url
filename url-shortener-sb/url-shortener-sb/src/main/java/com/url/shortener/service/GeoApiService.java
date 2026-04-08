@@ -73,15 +73,14 @@ public class GeoApiService {
             return GeoData.unknown();
         }
 
-        String ipForLookup = normalizedIp;
-        if (isLoopbackIp(ipForLookup) || isPrivateIP(ipForLookup)) {
-            log.warn("Client IP is local/private. Using fallback public IP for ipapi lookup. originalIp={} fallbackIp=8.8.8.8", normalizedIp);
-            ipForLookup = "8.8.8.8";
+        if (!isValidPublicIP(normalizedIp)) {
+            log.warn("Skipping ipapi lookup for private/invalid ip={}", normalizedIp);
+            return GeoData.unknown();
         }
 
-        GeoData geoData = getRegionByIp(ipForLookup);
+        GeoData geoData = getRegionByIp(normalizedIp);
         log.info("CLIENT IP GEO: ip={} country={} region={} city={}",
-                ipForLookup,
+                normalizedIp,
                 geoData.getCountry(),
                 geoData.getRegion(),
                 geoData.getCity());
@@ -161,29 +160,52 @@ public class GeoApiService {
             return GeoData.unknown();
         }
 
+        long start = System.currentTimeMillis();
+        String safeIp = ip.trim();
+        System.out.println("==== IPAPI DEBUG START ====");
+        System.out.println("IP being sent: " + safeIp);
+
+        if (!isValidPublicIP(safeIp)) {
+            log.warn("Skipping ipapi lookup for private/invalid ip={}", safeIp);
+            System.out.println("FINAL CITY USED: UNKNOWN");
+            System.out.println("==== IPAPI DEBUG END ====");
+            return GeoData.unknown();
+        }
+
         try {
-            String safeIp = ip.trim();
-            if (isPrivateIP(safeIp)) {
-                safeIp = "8.8.8.8";
-            }
-
             String url = "https://ipapi.co/" + safeIp + "/json/";
-            String response = restTemplate.getForObject(url, String.class);
+            String responseBody = restTemplate.getForObject(url, String.class);
+            long end = System.currentTimeMillis();
+            System.out.println("IPAPI RESPONSE TIME: " + (end - start) + " ms");
+            System.out.println("IPAPI RESPONSE RAW: " + responseBody);
 
-            System.out.println("IP USED: " + safeIp);
-            System.out.println("IPAPI RESPONSE: " + response);
-
-            if (response == null || response.isBlank()) {
-                log.error("ipapi response invalid for ip={}", maskIp(safeIp));
+            if (responseBody == null || responseBody.isEmpty() || responseBody.isBlank() || "{}".equals(responseBody.trim())) {
+                System.out.println("IPAPI ERROR: Empty response");
+                log.warn("IPAPI LIMIT OR FAILURE DETECTED");
+                System.out.println("FINAL CITY USED: UNKNOWN");
                 return GeoData.unknown();
             }
 
-            JsonNode root = objectMapper.readTree(response);
+            if (responseBody.contains("error")) {
+                System.out.println("IPAPI ERROR RESPONSE: " + responseBody);
+                log.warn("IPAPI LIMIT OR FAILURE DETECTED");
+                System.out.println("FINAL CITY USED: UNKNOWN");
+                return GeoData.unknown();
+            }
+
+            JsonNode root = objectMapper.readTree(responseBody);
             String country = firstTextOrUnknown(root, "country_name", "country", "country_code");
             String region = firstTextOrUnknown(root, "region", "region_name");
             String city = root.has("city") && !root.get("city").isNull()
                     ? root.get("city").asText()
-                    : "UNKNOWN";
+                    : null;
+
+            System.out.println("Parsed city: " + city);
+            System.out.println("Parsed country: " + country);
+
+            if (city == null || city.equals("") || city.equalsIgnoreCase("null")) {
+                System.out.println("IPAPI WARNING: City is NULL");
+            }
 
             if (city == null || city.isBlank()) {
                 city = "UNKNOWN";
@@ -196,10 +218,18 @@ public class GeoApiService {
                 log.error("Country missing/null in ipapi response for ip={}", maskIp(safeIp));
             }
 
+            System.out.println("FINAL CITY USED: " + city);
             return new GeoData(country, region, city);
         } catch (Exception ex) {
+            long end = System.currentTimeMillis();
+            System.out.println("IPAPI RESPONSE TIME: " + (end - start) + " ms");
+            System.out.println("IPAPI ERROR RESPONSE: " + ex.getMessage());
+            log.warn("IPAPI LIMIT OR FAILURE DETECTED");
             log.warn("ipapi lookup failed for ip={}: {}", maskIp(ip), ex.getMessage());
+            System.out.println("FINAL CITY USED: UNKNOWN");
             return GeoData.unknown();
+        } finally {
+            System.out.println("==== IPAPI DEBUG END ====");
         }
     }
 
@@ -363,6 +393,14 @@ public class GeoApiService {
                 || ip.startsWith("172.16.")
                 || "localhost".equalsIgnoreCase(ip)
                 || "::1".equals(ip);
+    }
+
+    private boolean isValidPublicIP(String ip) {
+        return ip != null
+                && !ip.startsWith("127.")
+                && !ip.startsWith("10.")
+                && !ip.startsWith("192.168.")
+                && !ip.startsWith("172.");
     }
 
 

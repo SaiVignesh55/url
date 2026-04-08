@@ -27,6 +27,10 @@ public class IpAddressResolver {
 
 
     public String getClientIp(HttpServletRequest request) {
+        System.out.println("==== IP DEBUG START ====");
+        System.out.println("X-Forwarded-For: " + request.getHeader("X-Forwarded-For"));
+        System.out.println("RemoteAddr: " + request.getRemoteAddr());
+
         String ip = request.getHeader("X-Forwarded-For");
 
         if (ip == null || ip.isEmpty() || ip.equalsIgnoreCase("unknown")) {
@@ -37,6 +41,7 @@ public class IpAddressResolver {
             ip = ip.split(",")[0].trim();
         }
 
+        System.out.println("FINAL IP USED: " + ip);
         System.out.println("Client IP: " + ip);
         log.debug("Client IP extracted: {}", ip);
         return ip;
