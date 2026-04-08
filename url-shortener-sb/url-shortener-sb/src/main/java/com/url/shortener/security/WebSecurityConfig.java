@@ -75,6 +75,7 @@ public class WebSecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/scan/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/status/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/debug/test-ip", "/api/debug/test-ipapi", "/api/debug/debug-ip", "/api/debug/debug-click", "/api/debug/debug-ipapi").permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/r/**").permitAll()
                         .anyRequest().authenticated()

@@ -277,6 +277,7 @@ public class UrlMappingService {
                 clickEvent.getRegion(),
                 clickEvent.getCity());
         log.info("COUNTRY SAVED: {}", clickEvent.getCountry());
+        System.out.println("Saving city: " + clickEvent.getCity());
 
         clickEventRepository.save(clickEvent);
         log.info("SAVED TO DB");

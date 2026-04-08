@@ -9,7 +9,7 @@ public class GeoDebugResponse {
     private String resolvedIp;
     private boolean loopbackIp;
     private boolean tokenPresent;
-    private String ipapiRequestUrl;
+    private String ipApiRequestUrl;
     private String httpStatus;
     private String rawResponse;
     private String country;
